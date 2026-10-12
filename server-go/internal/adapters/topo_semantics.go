@@ -130,6 +130,20 @@ func fleetFdbEvidence(polled map[string]*routerPolled, gatewayID string) map[str
 					}
 					continue
 				}
+				// #1373: el padre de rid es quien aprende a rid FUERA de su
+				// propio root port (rid es downstream suyo). Un candidato que
+				// aprende a rid EN su root port tiene a rid aguas ARRIBA (o es
+				// lateral en L2 plana) y no puede ser su padre: sin esta guarda
+				// la relajación por profundidad cuelga un switch gestionado de
+				// sus propios APs (p. ej. switch16 <- rt4 cuando la física es
+				// switch16 -> gateway por lan7).
+				cRoot := ""
+				if gwMac := idToMac[gatewayID]; gwMac != "" {
+					cRoot = learned[c.parent][gwMac]
+				}
+				if cRoot != "" && c.port == cRoot {
+					continue
+				}
 				if isDescendant(rid, c.parent) {
 					continue
 				}
@@ -435,6 +449,53 @@ func BuildTopoSemantics(routers []Router, devices []Device, wg WireGuardStats, d
 		}
 		uplinkEvidence[rid] = ev
 		uplinkSource[rid] = "override"
+	}
+	// #1374: un distnode inferred que es la sombra no gestionada de un switch
+	// gestionado de la flota se absorbe: si el uplink del switch apunta al
+	// mismo (router, puerto) que ocupa el distnode, ambos nodos son la misma
+	// caja física (un puerto = un cable). El switch enlaza directo con el
+	// padre (el salto #1060 deja de encontrar distnode) y los clientes del
+	// distnode pasan a colgar del switch, su posición física real. Solo
+	// inferred: los managed tienen identidad propia (chassis MAC) y su dedup
+	// es el de #1325/D1.
+	switchUnit := map[string]bool{}
+	for _, r := range routers {
+		if r.Role == "Switch" {
+			switchUnit[r.ID] = true
+		}
+	}
+	if len(switchUnit) > 0 {
+		absorbed := map[string]string{} // distnode -> switch que lo absorbe
+		kept := dists[:0]
+		for _, dn := range dists {
+			hub := ""
+			if dn.Kind == "inferred" {
+				for rid := range switchUnit {
+					if ev, ok := uplinkEvidence[rid]; ok && ev.parent == dn.RouterID && ev.port != "" && ev.port == dn.Port {
+						hub = rid
+						break
+					}
+				}
+			}
+			if hub != "" {
+				absorbed[dn.ID] = hub
+				continue
+			}
+			kept = append(kept, dn)
+		}
+		if len(absorbed) > 0 {
+			dists = kept
+			for i := range online {
+				// Re-anclar al switch SOLO los clientes atribuidos a él: los
+				// atribuidos a otro router (p. ej. equipos de un switch NO
+				// gestionado que cuelga del gateway y cuyo tráfico el switch
+				// aprende en su root port) no son suyos; al quitar el blob
+				// quedan con su router, su posición física.
+				if sw, ok := absorbed[online[i].AttachTo]; ok && online[i].RouterID == sw {
+					online[i].AttachTo = sw
+				}
+			}
+		}
 	}
 	// #1042: el equipo aguas arriba del gateway (módem/ONT del ISP) se
 	// descubre por ARP como un cliente más, pero vive en el lado WAN: si su

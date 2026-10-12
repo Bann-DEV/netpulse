@@ -363,6 +363,112 @@ func TestFleetFdbEvidenceBothPorts(t *testing.T) {
 	}
 }
 
+// #1373: matriz FDB real de una flota con switch gestionado (12-Oct-2026):
+// la relajación por profundidad dejaba el uplink del switch en un AP
+// (rt3/rt4 se inflan la profundidad mutuamente en L2 plana y pisan la
+// candidata provisional del gateway). La FDB propia del switch lo desmiente:
+// los APs viven AGUAS ABAJO de su root port (lan7, donde aprende la MAC del
+// gateway). Un candidato aprendido fuera del root port no puede ser padre.
+func TestFleetFdbEvidenceRootPortDescartaDownstream(t *testing.T) {
+	polled := map[string]*routerPolled{
+		"gateway": {brMac: "94:83:C4:BA:BF:AA", fdb: map[string]string{
+			"8C:DE:F9:33:71:58": "lan4", // rt2
+			"9C:9D:7E:1B:EA:B2": "lan1", // rt3
+			"9C:9D:7E:54:EF:B8": "lan1", // rt4
+			"78:D8:00:32:31:49": "lan1", // switch16
+		}},
+		"redmi-ax6": {brMac: "8C:DE:F9:33:71:58", fdb: map[string]string{
+			"94:83:C4:BA:BF:AA": "wan",
+			"9C:9D:7E:1B:EA:B2": "wan",
+			"9C:9D:7E:54:EF:B8": "wan",
+		}},
+		"redmi-ax6-2": {brMac: "9C:9D:7E:1B:EA:B2", fdb: map[string]string{
+			"94:83:C4:BA:BF:AA": "lan1",
+			"8C:DE:F9:33:71:58": "lan1",
+			"9C:9D:7E:54:EF:B8": "lan1",
+			"78:D8:00:32:31:49": "lan1",
+		}},
+		"redmi-ax6-3": {brMac: "9C:9D:7E:54:EF:B8", fdb: map[string]string{
+			"94:83:C4:BA:BF:AA": "lan1",
+			"8C:DE:F9:33:71:58": "lan1",
+			"9C:9D:7E:1B:EA:B2": "lan1",
+			"78:D8:00:32:31:49": "lan1",
+		}},
+		"switch16": {brMac: "78:D8:00:32:31:49", fdb: map[string]string{
+			"94:83:C4:BA:BF:AA": "lan7", // gateway: root port real
+			"8C:DE:F9:33:71:58": "lan7", // rt2 también cuelga del gateway
+			"9C:9D:7E:1B:EA:B2": "lan3", // rt3: puerto de cobre 3
+			"9C:9D:7E:54:EF:B8": "lan6", // rt4: puerto de cobre 6
+		}},
+	}
+	ev := fleetFdbEvidence(polled, "gateway")
+	sw := ev["switch16"]
+	if sw.parent != "gateway" || sw.port != "lan1" || sw.childPort != "lan7" {
+		t.Fatalf("switch16: %+v, want gateway/lan1 con childPort lan7", sw)
+	}
+	// Sin regresión en los APs: rt2 sigue colgando del gateway y, como
+	// bonus, la FDB sola ya cuelga rt3/rt4 del switch (antes los dejaba en
+	// cadena rt2->rt3->rt4): el switch los aprende fuera de su root port.
+	if rt2 := ev["redmi-ax6"]; rt2.parent != "gateway" || rt2.port != "lan4" {
+		t.Fatalf("rt2: %+v, want gateway/lan4", rt2)
+	}
+	if rt3 := ev["redmi-ax6-2"]; rt3.parent != "switch16" || rt3.port != "lan3" || rt3.childPort != "lan1" {
+		t.Fatalf("rt3: %+v, want switch16/lan3 con childPort lan1", rt3)
+	}
+	if rt4 := ev["redmi-ax6-3"]; rt4.parent != "switch16" || rt4.port != "lan6" || rt4.childPort != "lan1" {
+		t.Fatalf("rt4: %+v, want switch16/lan6 con childPort lan1", rt4)
+	}
+}
+
+// #1373: no-regresión sobre el árbol documentado del contribuidor de #1279
+// (gw -> sw1 -> {ap1, sw2 -> ap2}), con sus dos artefactos: estrella plana
+// (el gateway aprende todas las MACs en lan1) y tránsito FDB (ap2 visible en
+// la tabla de sw1 por el puerto hacia sw2). La guarda del root port NO debe
+// cambiar la resolución: cada padre aprende a su hijo en puerto de bajada.
+func TestFleetFdbEvidenceArbolContribuidor(t *testing.T) {
+	polled := map[string]*routerPolled{
+		"gw": {brMac: "AA:00:00:00:00:01", fdb: map[string]string{
+			"AA:00:00:00:00:02": "lan1", // sw1
+			"AA:00:00:00:00:03": "lan1", // ap1
+			"AA:00:00:00:00:04": "lan1", // sw2
+			"AA:00:00:00:00:05": "lan1", // ap2 (estrella plana)
+		}},
+		"sw1": {brMac: "AA:00:00:00:00:02", fdb: map[string]string{
+			"AA:00:00:00:00:01": "1", // root port hacia el gw
+			"AA:00:00:00:00:03": "3", // ap1
+			"AA:00:00:00:00:04": "4", // sw2
+			"AA:00:00:00:00:05": "4", // ap2 (tránsito FDB)
+		}},
+		"ap1": {brMac: "AA:00:00:00:00:03", fdb: map[string]string{
+			"AA:00:00:00:00:01": "1",
+			"AA:00:00:00:00:02": "1", // sw1 por su uplink
+		}},
+		"sw2": {brMac: "AA:00:00:00:00:04", fdb: map[string]string{
+			"AA:00:00:00:00:01": "8", // root port hacia sw1
+			"AA:00:00:00:00:02": "8", // sw1 por su uplink
+			"AA:00:00:00:00:05": "7", // ap2
+		}},
+		"ap2": {brMac: "AA:00:00:00:00:05", fdb: map[string]string{
+			"AA:00:00:00:00:01": "1",
+			"AA:00:00:00:00:02": "1",
+			"AA:00:00:00:00:04": "1", // sw2 por su uplink
+		}},
+	}
+	ev := fleetFdbEvidence(polled, "gw")
+	if sw1 := ev["sw1"]; sw1.parent != "gw" || sw1.port != "lan1" || sw1.childPort != "1" {
+		t.Fatalf("sw1: %+v, want gw/lan1 childPort 1", sw1)
+	}
+	if ap1 := ev["ap1"]; ap1.parent != "sw1" || ap1.port != "3" || ap1.childPort != "1" {
+		t.Fatalf("ap1: %+v, want sw1/3 childPort 1", ap1)
+	}
+	if sw2 := ev["sw2"]; sw2.parent != "sw1" || sw2.port != "4" || sw2.childPort != "8" {
+		t.Fatalf("sw2: %+v, want sw1/4 childPort 8", sw2)
+	}
+	if ap2 := ev["ap2"]; ap2.parent != "sw2" || ap2.port != "7" || ap2.childPort != "1" {
+		t.Fatalf("ap2: %+v, want sw2/7 childPort 1", ap2)
+	}
+}
+
 // #1060: el uplink sale del distnode (círculo inferido/gestionado) cuando el
 // puerto de la evidencia coincide con su (router, puerto): gateway -> círculo
 // -> AP, sin saltarse el switch intermedio.
@@ -610,4 +716,50 @@ func TestTopoSemanticsFallbackSinEvidencia(t *testing.T) {
 		}
 	}
 	t.Fatal("falta el uplink de ap1")
+}
+
+// #1374: el distnode inferred que es la sombra no gestionada de un switch
+// gestionado de la flota se absorbe: el switch enlaza directo con el padre
+// y los clientes del blob pasan a colgar del switch (su posición física).
+func TestTopoSemanticsAbsorbeDistnodeSombra(t *testing.T) {
+	routers := []Router{
+		{ID: "gw", Name: "gateway", Role: "Gateway principal", RoleBadge: "Principal", MAC: "AA:BB:CC:00:00:01"},
+		{ID: "sw", Name: "switch", Role: "Switch", RoleBadge: "SW", MAC: "AA:BB:CC:00:00:02"},
+	}
+	devices := []Device{
+		{ID: "cam", MAC: "AA:BB:CC:00:00:09", RouterID: "sw", Band: "cable", Online: true, AttachTo: "dist-gw-lan1"},
+		// Equipo de un switch NO gestionado colgado del gateway: el blob se
+		// absorbe pero este cliente NO se re-ancla al switch (no es suyo).
+		{ID: "pc", MAC: "AA:BB:CC:00:00:0A", RouterID: "gw", Band: "cable", Online: true, AttachTo: "dist-gw-lan1"},
+	}
+	dists := []DistributionNode{
+		{ID: "dist-gw-lan1", RouterID: "gw", Kind: "inferred", Port: "lan1"},
+	}
+	ev := map[string]topoParent{"sw": {parent: "gw", port: "lan1"}}
+	sem := BuildTopoSemantics(routers, devices, WireGuardStats{}, dists, "", ev, nil, nil)
+	var uplink *TopoLink
+	for i := range sem.Links {
+		l := &sem.Links[i]
+		if l.Kind == "uplink" && l.To == "sw" {
+			uplink = l
+		}
+		if l.From == "dist-gw-lan1" || l.To == "dist-gw-lan1" {
+			t.Fatalf("el distnode sombra no debe aparecer en enlaces: %+v", *l)
+		}
+	}
+	if uplink == nil || uplink.From != "gw" || uplink.Port != "lan1" {
+		t.Fatalf("uplink sw: %+v, want desde gw por lan1", uplink)
+	}
+	fromOf := map[string]string{}
+	for _, l := range sem.Links {
+		if l.Kind == "wired" {
+			fromOf[l.To] = l.From
+		}
+	}
+	if fromOf["cam"] != "sw" {
+		t.Fatalf("cam cuelga de %q, want sw (cliente atribuido al switch)", fromOf["cam"])
+	}
+	if fromOf["pc"] != "gw" {
+		t.Fatalf("pc cuelga de %q, want gw (cliente del switch tonto, no del gestionado)", fromOf["pc"])
+	}
 }
