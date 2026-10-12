@@ -103,6 +103,8 @@ export interface BackhaulRow {
   kind: TopoLinkKind
   type: string
   speed: string
+  /** Latencia del extremo destino en ms, formateada (#1384); "—" sin dato. */
+  ping: string
   signal: string
   tone: 'ok' | 'warn' | 'tunnel'
   statusLabel: string
@@ -1616,9 +1618,15 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
   // gateway. Sin semántica o sin match → gateway (comportamiento de siempre,
   // demo incluido).
   const uplinkSemByNodeId = new Map<string, TopoSemLink>()
+  // #1384: velocidad del cable de un dispositivo cuando el padre la midió
+  // en esa boca (server, fillWiredSpeeds: p. ej. los hipervisores en las
+  // bocas a 2,5 G del switch gestionado, aunque el device no traiga
+  // speedMbps de ningún controlador).
+  const wiredSemSpeedByTo = new Map<string, number>()
   if (sem) {
     for (const sl of sem.links) {
       if (sl.kind === 'uplink') uplinkSemByNodeId.set(sl.to, sl)
+      if (sl.kind === 'wired' && sl.speedMbps && sl.speedMbps > 0) wiredSemSpeedByTo.set(sl.to, sl.speedMbps)
     }
   }
   const uplinkParentName = (nodeId: string): string => {
@@ -1639,15 +1647,29 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
   }
   const uplinkSpeed = (nodeId: string): string =>
     linkSpeed(uplinkSemByNodeId.get(nodeId)?.speedMbps)
+  // #1384: ping del enlace = latencia sondeada del equipo destino (ms, un
+  // decimal bajo 10 ms para que se aprecien las LAN); "—" sin sonda.
+  const fmtPing = (ms?: number): string => {
+    if (ms == null || ms < 0) return '—'
+    if (ms === 0) return '<1 ms'
+    return ms < 10 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`
+  }
   if (gatewayNode) {
     backhauls.push({
       id: 'wan', a: gatewayNode.router.name, b: 'Internet', kind: 'wan',
-      type: 'topology.links.fiberWan', speed: wan.plan, signal: `${wan.latencyMs} ms`,
+      type: 'topology.links.fiberWan', speed: wan.plan,
+      ping: fmtPing(wan.latencyMs), signal: '—',
       tone: 'ok', statusLabel: 'common.status.online',
       spark: gatewayNode.router.sparkline, sparkColor: COLOR.accent,
     })
   }
-  for (const node of apNodes) {
+  for (const node of [...apNodes, ...switchNodes]) {
+    // #1384: el uplink lo lista TODA unidad de flota no-gateway, no solo los
+    // APs: el switch gestionado (roleBadge SW) también cuelga del gateway y
+    // su enlace (p. ej. Flint2 <-> KP-9000 a 2,5 Gbps) estaba en el mapa y
+    // en la semántica pero no en la tabla. No hay duplicado con el bucle
+    // 'dist' de abajo: la sombra distnode del switch se absorbe server-side
+    // (#1374/#1376) y no llega en distributionNodes.
     const isWifi = node.router.backhaul === 'wifi'
     backhauls.push({
       id: `uplink-${node.id}`, a: `${uplinkParentName(node.id)}${uplinkPortSuffix(node.id)}`, b: node.router.name, kind: 'uplink',
@@ -1657,6 +1679,7 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
       // boca (#1321); "—" si nadie la midió. El tono sí es información
       // real: un enlace por wifi merece mirarse más que uno por cable.
       speed: uplinkSpeed(node.id),
+      ping: fmtPing(node.router.latencyMs),
       signal: '—',
       tone: isWifi ? 'warn' : 'ok',
       statusLabel: isWifi ? 'common.status.warn' : 'common.status.online',
@@ -1680,7 +1703,7 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
         id: `dist-${dv.id}`, a,
         b: [dv.node.name, dv.node.ip, via, dv.node.portLabel ?? dv.node.port].filter(Boolean).join(' · '),
         kind: 'dist', type: dv.node.role === 'ap' ? 'topology.links.managedAp' : 'topology.links.managedSwitch',
-        speed: linkSpeed(dv.node.speedMbps), signal: '—',
+        speed: linkSpeed(dv.node.speedMbps), ping: fmtPing(rn?.router.latencyMs), signal: '—',
         tone: 'ok', statusLabel: 'common.status.online',
         spark, sparkColor: COLOR.accent,
       })
@@ -1689,7 +1712,7 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
         id: `dist-${dv.id}`, a,
         b: '', bKey: 'topology.links.inferredSwitch', bVars: { port: dv.node.portLabel ?? dv.node.port },
         kind: 'dist', type: 'common.cable',
-        speed: linkSpeed(dv.node.speedMbps), signal: '—',
+        speed: linkSpeed(dv.node.speedMbps), ping: fmtPing(rn?.router.latencyMs), signal: '—',
         tone: 'ok', statusLabel: 'common.status.online',
         spark, sparkColor: COLOR.ok,
       })
@@ -1707,7 +1730,10 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
       id: `wired-${host.id}`, a: hubNameOf(host),
       b: [host.name, port, `${ctCountByHost.get(host.id) ?? 0} CT`].filter(Boolean).join(' · '),
       kind: 'wired', type: 'topology.links.hypervisorCable',
-      speed: linkSpeed(host.speedMbps), signal: '—',
+      // #1384: primero la boca medida por el padre en este sondeo (sem
+      // wired, fillWiredSpeeds); si no, el sello del controlador en el
+      // device; si ninguno, "—" honesta.
+      speed: linkSpeed(wiredSemSpeedByTo.get(host.id) ?? host.speedMbps), ping: '—', signal: '—',
       tone: 'ok', statusLabel: 'common.status.online',
       spark: host.sparkline, sparkColor: COLOR.ok,
     })
@@ -1717,7 +1743,7 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
     const device = devices.find((d) => d.id === node.peer.id)
     backhauls.push({
       id: `wg-${node.peer.id}`, a: 'Internet', b: node.peer.name, kind: 'wg',
-      type: 'WireGuard', speed: '—', signal: '—',
+      type: 'WireGuard', speed: '—', ping: '—', signal: '—',
       tone: 'tunnel', statusLabel: 'common.active',
       spark: device?.sparkline ?? [0, 0], sparkColor: COLOR.tunnel,
     })
