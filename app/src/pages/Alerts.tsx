@@ -21,6 +21,7 @@ import {
   Server,
   Settings2,
   Shield,
+  ShieldCheck,
   Signal,
   Smartphone,
   Tablet,
@@ -36,6 +37,7 @@ import { CountUp } from '@/components/CountUp'
 import { EmptyState } from '@/components/EmptyState'
 import { RowAction } from '@/components/RowAction'
 import { SegmentedControl } from '@/components/SegmentedControl'
+import { Switch } from '@/components/ui/switch'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -286,6 +288,55 @@ function ContextPanel({ ev, animateIn }: { ev: FeedEvent; animateIn: boolean }) 
   )
 }
 
+// ImpostorRuleToggle (#1400): interruptor global de la detección de SSID
+// impostor. Vive en el diálogo "Configurar alertas"; fetch propio (no
+// pertenece al bundle: solo se consulta aquí). En demo es solo local.
+function ImpostorRuleToggle() {
+  const { t } = useTranslation()
+  const { isDemo } = useNetPulse()
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (isDemo) {
+      setEnabled(true)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/alerts/impostor-rule')
+        if (res.ok && !cancelled) {
+          const data = (await res.json()) as { enabled?: boolean }
+          setEnabled(data.enabled !== false)
+        }
+      } catch {
+        /* sin estado: el toggle queda oculto */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isDemo])
+  const toggle = (v: boolean) => {
+    setEnabled(v)
+    if (isDemo) return
+    void fetch('/api/alerts/impostor-rule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: v }),
+    }).catch(() => setEnabled((prev) => prev))
+  }
+  if (enabled === null) return null
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 border-t border-border/60 pt-4">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-text-primary">{t('alerts.impostorRule')}</div>
+        <p className="mt-0.5 text-caption leading-snug text-text-muted">{t('alerts.impostorRuleDesc')}</p>
+      </div>
+      <Switch checked={enabled} onCheckedChange={toggle} aria-label={t('alerts.impostorRule')} />
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Fila del feed (timeline, alerts.md §④)
 // ---------------------------------------------------------------------------
@@ -299,6 +350,8 @@ interface FeedRowProps {
   reduce: boolean
   onSilence?: (id: string, duration: '1h' | '24h' | 'forever') => void
   onDismiss?: (id: string) => void
+  /** #1400: aprobar el BSSID de una alerta wifi-ssid-impostor como propio. */
+  onApproveImpostor?: (bssid: string) => void
   action?: { icon: LucideIcon; title: string; onClick: () => void }
   /** #1349: feed por id para resolver los eventos que un evento de cierre
    *  (`ev.resolves`) cerró y listarlos al expandirlo. */
@@ -307,7 +360,7 @@ interface FeedRowProps {
 
 // #862: RowAction vive en components/RowAction.tsx (compartido con AlertItem).
 
-function FeedRow({ ev, index, read, expanded, onToggle, reduce, onSilence, onDismiss, action, feedById }: FeedRowProps) {
+function FeedRow({ ev, index, read, expanded, onToggle, reduce, onSilence, onDismiss, onApproveImpostor, action, feedById }: FeedRowProps) {
   const { t } = useTranslation()
   const sev = SEVERITY[ev.severity]
   const Icon = ev.icon ?? sev.icon
@@ -403,6 +456,19 @@ function FeedRow({ ev, index, read, expanded, onToggle, reduce, onSilence, onDis
                   />
                 )}
               </AnimatePresence>
+              {/* #1400: en alertas de impostor, aprobar el BSSID como
+                  propio (AP conocido fuera de la flota: UniFi, Omada...).
+                  Persiste en el backend y resuelve la alerta. */}
+              {onApproveImpostor && ev.type === 'wifi-ssid-impostor' && ev.vars?.bssid && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onApproveImpostor(ev.vars!.bssid!) }}
+                  className="rounded-md p-1 opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-ok pointer-coarse:opacity-100 pointer-coarse:p-2"
+                  title={t('alerts.approveBssid')}
+                >
+                  <ShieldCheck className="h-4 w-4" strokeWidth={1.75} />
+                </button>
+              )}
               {onSilence && (
                 <button
                   type="button"
@@ -543,6 +609,7 @@ export default function Alerts() {
     clearAllAlerts,
     silenceAlert,
     dismissAlert,
+    approveImpostorBssid,
   } = useNetPulse()
   // Feed: demo = diseño enriquecido del mockup; live = SOLO alertas reales
   const alertFeed = useMemo(
@@ -936,6 +1003,7 @@ export default function Alerts() {
                   )
                 })}
               </ul>
+              <ImpostorRuleToggle />
               <div className="mt-4 border-t border-border/60 pt-4">
                 <RulesManager />
               </div>
@@ -1038,6 +1106,7 @@ export default function Alerts() {
                     reduce={reduce}
                     onSilence={silenceAlert}
                     onDismiss={dismissAlert}
+                    onApproveImpostor={approveImpostorBssid}
                     action={actionOf(ev)}
                     feedById={feedById}
                   />

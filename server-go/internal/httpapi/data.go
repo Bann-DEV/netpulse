@@ -469,6 +469,93 @@ func (s *server) handleAlertsSilenced(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.adapter.AlertsEngine().Silenced())
 }
 
+// handleAlertsImpostorApprove (POST): body {"bssid":"AA:BB:..."} → aprueba el
+// BSSID como propio (#1400): la regla wifi-ssid-impostor lo ignora y la
+// alerta activa (si la hay) se resuelve. Persistido en kv.
+func (s *server) handleAlertsImpostorApprove(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Bssid string `json:"bssid"`
+	}
+	if st := readJSONBody(w, r, &body); st != 0 {
+		writeBodyError(w, st, "invalid_body", "body JSON inválido")
+		return
+	}
+	ap, ok := s.adapter.(interface{ ApproveImpostorBssid(string) error })
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "not_supported", "adapter does not support impostor approval")
+		return
+	}
+	if err := ap.ApproveImpostorBssid(body.Bssid); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "invalid bssid")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAlertsImpostorRevoke (POST): body {"bssid":"..."} → quita el BSSID de
+// la lista de aprobados (#1400); si sigue visible, la regla re-alerta.
+func (s *server) handleAlertsImpostorRevoke(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Bssid string `json:"bssid"`
+	}
+	if st := readJSONBody(w, r, &body); st != 0 {
+		writeBodyError(w, st, "invalid_body", "body JSON inválido")
+		return
+	}
+	ap, ok := s.adapter.(interface{ RevokeImpostorBssid(string) })
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "not_supported", "adapter does not support impostor approval")
+		return
+	}
+	ap.RevokeImpostorBssid(body.Bssid)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleAlertsImpostorApproved (GET): lista de BSSIDs aprobados (#1400).
+func (s *server) handleAlertsImpostorApproved(w http.ResponseWriter, _ *http.Request) {
+	ap, ok := s.adapter.(interface{ ImpostorApproved() []string })
+	if !ok {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	writeJSON(w, http.StatusOK, ap.ImpostorApproved())
+}
+
+// handleAlertsImpostorRuleGet (GET): interruptor global de la regla de
+// impostores (#1400) → {"enabled": bool}. Default true.
+func (s *server) handleAlertsImpostorRuleGet(w http.ResponseWriter, _ *http.Request) {
+	ap, ok := s.adapter.(interface{ ImpostorRuleEnabled() bool })
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]bool{"enabled": true})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"enabled": ap.ImpostorRuleEnabled()})
+}
+
+// handleAlertsImpostorRuleSet (POST): body {"enabled": bool} → activa o
+// desactiva la regla entera (#1400). Al desactivar, las alertas de impostor
+// activas se resuelven.
+func (s *server) handleAlertsImpostorRuleSet(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if st := readJSONBody(w, r, &body); st != 0 {
+		writeBodyError(w, st, "invalid_body", "body JSON inválido")
+		return
+	}
+	if body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "enabled is required")
+		return
+	}
+	ap, ok := s.adapter.(interface{ SetImpostorRuleEnabled(bool) })
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "not_supported", "adapter does not support impostor rule toggle")
+		return
+	}
+	ap.SetImpostorRuleEnabled(*body.Enabled)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": *body.Enabled})
+}
+
 // handleTopology: {routers, devices} sin paginar.
 func (s *server) handleTopology(w http.ResponseWriter, r *http.Request) {
 	routers := s.adapter.GetRouters(r.Context())
