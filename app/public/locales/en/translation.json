@@ -320,6 +320,7 @@
       "d_one": "{{n}} day ago",
       "d_other": "{{n}} days ago"
     },
+    "close": "Close",
     "days": {
       "mon": "Mon",
       "tue": "Tue",
@@ -1641,9 +1642,7 @@
       "deleteDesc": "The token for “{{slug}}” will be revoked. The scraper will stop sending data until you regenerate the token.",
       "regenToken": "Regenerate token",
       "regenTokenCaption": "Rotate external agent token (LABS)",
-      "badge": "LABS",
-      "rack": "Rack view",
-      "rackCaption": "Draw your rack and detect cables. Off by default; do not use in production."
+      "badge": "LABS"
     },
     "saved": "Preferences saved",
     "services": {
@@ -1656,6 +1655,7 @@
       "labsCaption": "In development. For experimental use",
       "orchestrationHint": "Manage routers from the UI (AdGuard, guest Wi-Fi, DDNS…)",
       "networkGroup": "Network services",
+      "rackCaption": "Draw your rack and detect cables. Off by default.",
       "firmwareUpgradesCaption": "Show or hide the firmware upgrades page",
       "integrationsGroup": "Integrations",
       "proxmoxCaption": "Cluster inventory (hypervisors and CTs)",
@@ -2229,6 +2229,7 @@
     "owutConfirmTitle": "Upgrade with owut (ASU)",
     "owutConfirmBody": "The ASU server will build a stock OpenWrt image and the router will install it. The session drops when it reboots.",
     "owutConfirmPackages": "The ASU image keeps the packages you installed on the router",
+    "owutConfirmVendor": "This upgrade comes from the vendor repository (GL.iNet), not from OpenWrt.",
     "scheduleTitle": "Schedule upgrade",
     "scheduleBody": "Date/time and recurrence. It only flashes when the installed version differs from the target.",
     "rec_once": "Once",
@@ -2643,6 +2644,9 @@
   "rack": {
     "title": "Rack",
     "subtitle": "Your physical hardware, placed and patched.",
+    "uplinkUnit": "Uplink unit",
+    "uplinkUnitNone": "None",
+    "uplinkUnitSet": "Uplink unit updated",
     "addRack": "Add rack",
     "deleteRack": "Delete rack",
     "deleteRackConfirm": "Delete this rack and everything mounted on it?",
@@ -2711,6 +2715,6 @@
     "betaTitle": "Preview: much work remains",
     "betaText": "This view is under active development and not fully reliable yet. Do not use it in production; feedback is welcome.",
     "disabledTitle": "The rack view is disabled",
-    "disabledText": "It is a development view (labs). Enable it in Settings → Labs → Rack view to try it."
+    "disabledText": "It is an optional view. Enable it in Settings → Services → Rack view."
   }
 }

@@ -320,6 +320,7 @@
       "d_one": "hace {{n}} día",
       "d_other": "hace {{n}} días"
     },
+    "close": "Cerrar",
     "days": {
       "mon": "Lun",
       "tue": "Mar",
@@ -1641,9 +1642,7 @@
       "deleteDesc": "Se revocará el token de \"{{slug}}\". El scraper dejará de poder enviar datos hasta que regeneres el token.",
       "regenToken": "Regenerar token",
       "regenTokenCaption": "Rotación del token de agentes externos (LABS)",
-      "badge": "LABS",
-      "rack": "Vista de rack",
-      "rackCaption": "Dibuja tu rack y detecta los cables. Desactivado por defecto; no usar en producción."
+      "badge": "LABS"
     },
     "saved": "Preferencias guardadas",
     "services": {
@@ -1656,6 +1655,7 @@
       "labsCaption": "En desarrollo. Para uso experimental",
       "orchestrationHint": "Permite gestionar routers desde la interfaz (AdGuard, WiFi invitados, DDNS…)",
       "networkGroup": "Servicios de red",
+      "rackCaption": "Dibuja tu rack y detecta los cables. Desactivado por defecto.",
       "firmwareUpgradesCaption": "Muestra u oculta la página de actualizaciones de firmware",
       "integrationsGroup": "Integraciones",
       "proxmoxCaption": "Inventario del cluster (hipervisores y CTs)",
@@ -2229,6 +2229,7 @@
     "owutConfirmTitle": "Actualizar con owut (ASU)",
     "owutConfirmBody": "El servidor ASU construirá una imagen OpenWrt estándar y el router la instalará. La sesión se cortará al reiniciar.",
     "owutConfirmPackages": "La imagen ASU conserva los paquetes que instalaste en el router",
+    "owutConfirmVendor": "Esta actualización procede del repositorio del fabricante (GL.iNet), no de OpenWrt.",
     "scheduleTitle": "Programar actualización",
     "scheduleBody": "Fecha/hora y recurrencia. Solo flashea si la versión instalada difiere del objetivo.",
     "rec_once": "Una vez",
@@ -2643,6 +2644,9 @@
   "rack": {
     "title": "Rack",
     "subtitle": "Tu hardware físico, colocado y cableado.",
+    "uplinkUnit": "Unidad de uplink",
+    "uplinkUnitNone": "Ninguna",
+    "uplinkUnitSet": "Unidad de uplink actualizada",
     "addRack": "Añadir rack",
     "deleteRack": "Eliminar rack",
     "deleteRackConfirm": "¿Eliminar el rack y todo lo que tiene montado?",
@@ -2711,6 +2715,6 @@
     "betaTitle": "Vista previa: queda mucho trabajo por hacer",
     "betaText": "Esta vista está en desarrollo activo y todavía no es fiable al 100%. No la utilices todavía en producción; esperamos tus comentarios.",
     "disabledTitle": "La vista de rack está desactivada",
-    "disabledText": "Es una vista en desarrollo (labs). Actívala en Ajustes → Labs → Vista de rack si quieres probarla."
+    "disabledText": "Es una vista opcional. Actívala en Ajustes → Servicios → Vista de rack."
   }
 }
