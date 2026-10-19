@@ -20,6 +20,8 @@ type firmwareStatusResponse struct {
 	TargetVersion  string `json:"targetVersion"`
 	TargetURL      string `json:"targetUrl"`
 	Checksum       string `json:"checksum"`
+	// Method (#1414): método preferido de la tarjeta (auto/owut/url/upload).
+	Method string `json:"method"`
 	// Detección #477 P2: último board info reportado por el agente/SSH.
 	// detectedBoard es el board_name (perfil ASU) y detectedTarget el
 	// DISTRIB_TARGET; base para el prefill del formulario y el lookup ASU.
@@ -49,6 +51,8 @@ func (s *server) registerFirmwareRoutes(mux *http.ServeMux) {
 
 	// Ciclo owut completo + recurrencia (#761).
 	s.registerFirmwareOwutRoutes(mux)
+	// Método por unidad + imagen subida desde local (#1414).
+	s.registerFirmwareUploadRoutes(mux)
 
 	mux.Handle("GET /api/firmware-upgrades", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.db == nil {
@@ -85,6 +89,7 @@ func (s *server) registerFirmwareRoutes(mux *http.ServeMux) {
 				RouterID: r.ID,
 				Name:     r.Name,
 				Model:    model,
+				Method:   firmware.LoadMethod(s.db.DB, r.ID),
 			}
 			if t := targetMap[r.ID]; t != nil {
 				item.CurrentVersion = t.CurrentVersion

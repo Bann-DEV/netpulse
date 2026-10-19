@@ -176,6 +176,93 @@ func (s *server) registerFirmwareOwutRoutes(mux *http.ServeMux) {
 		}
 	})))
 
+	// POST owut-download: construye y descarga la imagen en el router SIN
+	// flashear (paso intermedio del flujo por pasos, #1414). Síncrono: la
+	// salida completa es la revisión del admin antes de instalar.
+	mux.Handle("POST /api/firmware-upgrades/{routerId}/owut-download", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("routerId")
+		host := s.hostOfRouter(id)
+		if host == "" {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		if s.pool == nil {
+			writeError(w, http.StatusServiceUnavailable, "no_ssh_pool")
+			return
+		}
+		plat := s.platform(id, host)
+		if plat.Vendor != "" {
+			writeError(w, http.StatusUnprocessableEntity, "vendor_firmware",
+				"El router lleva firmware del fabricante (GL.iNet): NetPulse no gestiona sus actualizaciones, usa su propio panel.")
+			return
+		}
+		if !plat.Owut {
+			writeError(w, http.StatusPreconditionFailed, "owut_not_installed",
+				"owut no está instalado en el router: instálalo primero con el botón Instalar owut.")
+			return
+		}
+		var body struct {
+			TargetVersion string `json:"targetVersion"`
+		}
+		if st := readJSONBody(w, r, &body); st != 0 {
+			return
+		}
+		cmd := firmware.OwutDownloadCmd(body.TargetVersion, s.detectedFirmwareVersion(id))
+		exit, out, err := firmware.RunOwutDownload(s.pool, host, cmd)
+		if err != nil || exit != 0 {
+			msg := owutTail(out, err)
+			if msg == "" {
+				msg = fmt.Sprintf("owut download falló (exit %d)", exit)
+			}
+			writeError(w, http.StatusBadGateway, "owut_download_failed", msg)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "output": out})
+	})))
+
+	// POST owut-install-image: flashea la imagen que owut-download dejó en el
+	// router (#1414, paso final del flujo por pasos). Igual que owut-upgrade:
+	// 202 inmediata, la máquina de estados confirma tras el reboot.
+	mux.Handle("POST /api/firmware-upgrades/{routerId}/owut-install-image", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("routerId")
+		host := s.hostOfRouter(id)
+		if host == "" {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		if s.pool == nil {
+			writeError(w, http.StatusServiceUnavailable, "no_ssh_pool")
+			return
+		}
+		plat := s.platform(id, host)
+		if plat.Vendor != "" {
+			writeError(w, http.StatusUnprocessableEntity, "vendor_firmware",
+				"El router lleva firmware del fabricante (GL.iNet): NetPulse no gestiona sus actualizaciones, usa su propio panel.")
+			return
+		}
+		if !plat.Owut {
+			writeError(w, http.StatusPreconditionFailed, "owut_not_installed",
+				"owut no está instalado en el router: instálalo primero con el botón Instalar owut.")
+			return
+		}
+		if up, _ := s.firmware.LatestUpgrade(id); up != nil && owutUpgradeActive(up.Status) {
+			writeError(w, http.StatusConflict, "upgrade_in_progress", "Ya hay un upgrade en curso")
+			return
+		}
+		target := ""
+		if t, _ := s.firmware.GetTarget(id); t != nil {
+			target = t.TargetVersion
+		}
+		uid, err := s.firmware.BeginUpgrade(id, target, "", "")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "firmware_error", err.Error())
+			return
+		}
+		_ = s.firmware.SetEngine(uid, "owut")
+		go s.runOwutInstallImage(uid, id, host, target)
+		writeJSON(w, http.StatusAccepted, map[string]any{"upgradeId": uid, "engine": "owut"})
+	})))
+
 	// GET/PUT/DELETE recurrence: programación once/weekly/monthly.
 	mux.Handle("GET /api/firmware-upgrades/{routerId}/recurrence", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("routerId")
@@ -273,6 +360,45 @@ func (s *server) runOwutUpgrade(id int64, routerID, host, target, origin string,
 		log.Printf("[firmware] owut upgrade %s falló (exit %d): %s", routerID, exit, msg)
 		_ = s.firmware.SetStatus(id, "failed", msg, "")
 		s.emitFirmwareResult(routerID, from, target, origin, false, msg)
+	}
+}
+
+// runOwutInstallImage ejecuta `owut install` (flash de la imagen ya
+// descargada por owut-download, paso final de #1414). Igual semántica que
+// runOwutUpgrade: la muerte de la sesión SSH tras >owutSSHMinRun es el final
+// NORMAL del flash; el resultado se confirma mirando el board info.
+func (s *server) runOwutInstallImage(id int64, routerID, host, target string) {
+	from := ""
+	if s.boardVersionFn != nil {
+		from = s.boardVersionFn(routerID)
+	}
+	_ = s.firmware.SetStatus(id, "running", "", "")
+	if err := firmware.EnsureStackPreserved(s.pool, host); err != nil {
+		log.Printf("[firmware] preserve-stack %s falló (continuo): %v", routerID, err)
+	}
+	start := time.Now()
+	exit, out, err := firmware.RunOwutUpgrade(s.pool, host, firmware.OwutInstallCmd())
+	dur := time.Since(start)
+	switch {
+	case err == nil && exit == 0:
+		// owut install puede terminar sin reiniciar si no había imagen
+		// descargada: no es un éxito, es un no-op que hay que decir.
+		msg := strings.TrimSpace(out)
+		if msg == "" {
+			msg = "owut install terminó sin flashear (¿sin imagen descargada con owut download?)"
+		}
+		_ = s.firmware.SetStatus(id, "failed", msg, "")
+		s.emitFirmwareResult(routerID, from, target, "manual", false, msg)
+	case err != nil && dur >= owutSSHMinRun:
+		s.awaitReboot(id, routerID, target, "manual", from)
+	default:
+		msg := owutTail(out, err)
+		if strings.TrimSpace(msg) == "" {
+			msg = fmt.Sprintf("owut install falló (exit %d)", exit)
+		}
+		log.Printf("[firmware] owut install %s falló (exit %d): %s", routerID, exit, msg)
+		_ = s.firmware.SetStatus(id, "failed", msg, "")
+		s.emitFirmwareResult(routerID, from, target, "manual", false, msg)
 	}
 }
 

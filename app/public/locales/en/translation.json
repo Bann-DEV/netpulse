@@ -2265,7 +2265,22 @@
     "successTitle": "Upgrade completed!",
     "successBody": "The router is now on {{to}} in {{dur}} s: it rebooted and came back on its own, packages up to date. If you excluded a stack package, check its service is still running.",
     "successDismiss": "Got it",
-    "compatibleNote": "Only vanilla OpenWrt devices are shown; GL.iNet updates via its own channel."
+    "compatibleNote": "Only vanilla OpenWrt devices are shown; GL.iNet updates via its own channel.",
+    "method": "Upgrade method",
+    "methodAuto": "Auto (show everything)",
+    "methodOwut": "owut (ASU)",
+    "methodUrl": "Image URL",
+    "methodUpload": "Local upload",
+    "uploadTitle": "Upload an image",
+    "uploadHint": "Build an image with the OpenWrt ASU wizard (or download one) and upload it here. NetPulse stores it on the server and flashes it with a verified checksum.",
+    "uploadBusy": "Uploading...",
+    "uploadedInfo": "Uploaded: {{name}} ({{size}} MB). Click Upgrade now to flash it.",
+    "uploadedSaved": "An uploaded image is saved as the upgrade target. Click Upgrade now to flash it.",
+    "checkTooltip": "Runs 'owut check' on the router: what an upgrade would change, without changing anything",
+    "owutDownload": "Download image",
+    "owutDownloading": "Building and downloading...",
+    "owutDownloadOutput": "owut download output",
+    "owutInstallImage": "Install downloaded image"
   },
   "orchestration": {
     "title": "Orchestration",
