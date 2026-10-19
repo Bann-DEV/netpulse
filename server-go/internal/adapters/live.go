@@ -279,6 +279,13 @@ type Live struct {
 	// router RouterOS, para calcular bps por delta entre polls (igual que
 	// GetNetDev de OpenWrt sobre /proc/net/dev, routeros_api.go).
 	roNetPrev map[string]netByteSample
+	// fwAlert (#1411): estado de la alerta de firmware por unidad con target
+	// configurado: qué relación se alertó y contra qué versiones. Con eso la
+	// alerta es un episodio por unidad (se abre una vez, se actualiza solo si
+	// cambia la versión o el target, y se resuelve al coincidir). Protegido
+	// por mu.
+	fwAlert map[string]fwAlertState
+
 	// snmpFdbCount (#928): último conteo de entradas FDB por router SNMP,
 	// para loguear solo cuando el resultado cambia.
 	snmpFdbCount map[string]int
@@ -450,6 +457,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		now:                  time.Now,
 		lastGood:             map[string]*Router{},
 		lastStatus:           map[string]string{},
+		fwAlert:              map[string]fwAlertState{},
 		boardCache:           map[string]*BoardInfo{},
 		layoutCache:          map[string][]PortLayout{},
 		extrasCache:          map[string]*extrasSnapshot{},
@@ -1261,17 +1269,63 @@ func (l *Live) pollRouter(ctx context.Context, cfg RouterConfig) (*routerPolled,
 	}, nil
 }
 
-// firmwareOutdated decide si el firmware instalado no cumple el target
-// configurado por el admin (issue #241). Comparación tolerante e
-// insensible a mayúsculas: el target debe aparecer (Contains) dentro de la
-// descripción del firmware ("OpenWrt 25.12.5 r33051..." contiene "25.12.5").
-// Sin target ("" tras trim) → false (no hay comprobación).
-func firmwareOutdated(installed, target string) bool {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return false
+// fwAlertState (#1411): episodio de alerta de firmware abierto para una
+// unidad. cmp es el resultado de firmwareCompare que se alertó; installed y
+// target recuerdan contra qué se abrió para detectar el cambio de episodio.
+type fwAlertState struct {
+	cmp       int
+	installed string
+	target    string
+}
+
+// evalFirmwareAlert (#1411/#1412) abre, refresca o resuelve la alerta de
+// firmware de una unidad con target configurado. Un episodio por unidad: se
+// emite al detectarse el mismatch (ID estable alert-firmware-<id>), se
+// actualiza en sitio (EmitOrUpdate = episodio nuevo notificado) si cambia la
+// versión instalada o el target, y se resuelve (modelo #1349) al volver a
+// coincidir. Mientras el episodio sigue igual NO se re-emite: el feed no se
+// re-firea cada ciclo. El downgrade (target más viejo) alerta con wording
+// propio (#1412).
+func (l *Live) evalFirmwareAlert(routerID, name, installed, target string, cmp int) {
+	id := "alert-firmware-" + routerID
+	l.mu.Lock()
+	if l.fwAlert == nil {
+		l.fwAlert = map[string]fwAlertState{}
 	}
-	return !strings.Contains(strings.ToLower(strings.TrimSpace(installed)), strings.ToLower(target))
+	st, active := l.fwAlert[routerID]
+	if cmp == fwMatch {
+		delete(l.fwAlert, routerID)
+		l.mu.Unlock()
+		if active {
+			l.engine.Resolve(id)
+		}
+		return
+	}
+	if active && st.cmp == cmp && st.installed == installed && st.target == target {
+		// Episodio en curso sin cambios: nada que hacer (#1411).
+		l.mu.Unlock()
+		return
+	}
+	l.fwAlert[routerID] = fwAlertState{cmp: cmp, installed: installed, target: target}
+	l.mu.Unlock()
+	ev := AlertEvent{
+		ID: id, Category: alerts.CatSystem, Urgent: false,
+		Severity: "warn", RouterID: routerID,
+		Vars: map[string]string{"router": name, "firmware": installed, "target": target},
+		Time: "just now",
+	}
+	if cmp == fwOlder {
+		ev.Title = "Firmware downgrade target"
+		ev.Description = fmt.Sprintf("%s: configured target %q is older than the installed firmware %q", name, target, installed)
+		ev.Type = alerts.HintFirmwareDowngrade
+		ev.Hint = alerts.HintFor(alerts.HintFirmwareDowngrade)
+	} else {
+		ev.Title = "Firmware outdated"
+		ev.Description = fmt.Sprintf("%s: firmware %q does not match the target %q", name, installed, target)
+		ev.Type = alerts.HintFirmware
+		ev.Hint = alerts.HintFor(alerts.HintFirmware)
+	}
+	l.engine.EmitOrUpdate(ev)
 }
 
 // buildRouter construye el Router del contrato (index.js:221-249).
@@ -1346,10 +1400,14 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 		health -= 15
 	}
 	// issue #241: firmware fuera del target configurado penaliza la salud.
-	outdatedFw := false
-	if p.cfg.FirmwareTarget != "" && p.board != nil && firmwareOutdated(p.board.Release.Description, p.cfg.FirmwareTarget) {
-		health -= 5
-		outdatedFw = true
+	// #1412: la comparación es por versión de release parseada; un target más
+	// viejo que lo instalado (downgrade) no se penaliza como "desactualizado".
+	fwCmp := fwMatch
+	if p.cfg.FirmwareTarget != "" && p.board != nil {
+		fwCmp = firmwareCompare(p.board.Release.Description, p.cfg.FirmwareTarget)
+		if fwCmp == fwNewer || fwCmp == fwAmbiguous {
+			health -= 5
+		}
 	}
 	if health < 0 {
 		health = 0
@@ -1432,9 +1490,14 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 	if p.firmwareAvailable != "" && r.FirmwareTarget == "" {
 		r.FirmwareTarget = p.firmwareAvailable
 	}
-	if outdatedFw || p.firmwareAvailable != "" {
+	// #1411/#1412: con target configurado la alerta es UN episodio por unidad
+	// (ID estable), no un re-fire por ciclo: se abre al detectar el mismatch,
+	// se actualiza si cambia la versión o el target, y se resuelve al
+	// coincidir. El downgrade (target más viejo) alerta con wording propio.
+	if p.firmwareAvailable != "" {
 		r.FirmwareOutdated = true
-		// Alerta no urgente (category system); el engine aplica dedup 5 min.
+		// Rama RouterOS (sondeo API): se conserva el aviso por ciclo como
+		// hasta #1411; la dedup de 5 min lo acota.
 		l.engine.Emit(AlertEvent{
 			ID:       fmt.Sprintf("alert-firmware-%s-%d", p.cfg.ID, time.Now().UnixMilli()),
 			Category: alerts.CatSystem, Urgent: false,
@@ -1446,6 +1509,13 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 			Vars:        map[string]string{"router": name, "firmware": r.Firmware, "target": p.cfg.FirmwareTarget},
 			Time:        "just now", RouterID: p.cfg.ID,
 		})
+	} else if p.cfg.FirmwareTarget != "" {
+		if fwCmp == fwNewer || fwCmp == fwAmbiguous {
+			r.FirmwareOutdated = true
+		}
+		if p.board != nil {
+			l.evalFirmwareAlert(p.cfg.ID, name, r.Firmware, p.cfg.FirmwareTarget, fwCmp)
+		}
 	}
 	if p.temp > thr {
 		r.HotMetric = "temp"

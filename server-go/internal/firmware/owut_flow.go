@@ -211,6 +211,37 @@ func RunOwutUpgrade(runner Runner, host, cmd string) (int, string, error) {
 	return exit, raw, err
 }
 
+// owutDownloadTimeout: build remoto ASU + descarga de la imagen al router.
+// `owut download` NO flashea: termina por sí solo y la sesión SSH sobrevive.
+const owutDownloadTimeout = 10 * time.Minute
+
+// OwutDownloadCmd construye `owut download` (paso intermedio del flujo por
+// pasos de #1414): construye la imagen en ASU y la descarga al router SIN
+// flashear, para que el admin la revise antes de `owut install`. Sin -q a
+// propósito: la salida completa es la revisión.
+func OwutDownloadCmd(target, current string) string {
+	cmd := "owut download"
+	if target != "" && current != "" && target != current {
+		cmd += " -V " + shQuote(target)
+	}
+	return cmd
+}
+
+// RunOwutDownload ejecuta `owut download` y devuelve salida + exit. El comando
+// termina normalmente (no flashea), así que la sesión SSH NO muere: un exit
+// distinto de 0 o un error de sesión es fallo real.
+func RunOwutDownload(runner Runner, host, cmd string) (int, string, error) {
+	wrapped := cmd + ` 2>&1; printf '\n__owut_exit__=%d\n' $?`
+	out, err := runner.Run(host, wrapped, owutDownloadTimeout)
+	exit, raw := extractExitCode(out)
+	return exit, raw, err
+}
+
+// OwutInstallCmd construye `owut install`: flashea la imagen que `owut
+// download` dejó en el router y reinicia (la sesión SSH muere como en el
+// upgrade; el resultado se confirma por el board info tras el reboot).
+func OwutInstallCmd() string { return "owut install" }
+
 // Platform es la foto de plataforma de un router: si tiene owut y si lleva
 // firmware de fabricante. Vendor != "" significa firmware compilado por el
 // vendor con su propia gestión de actualizaciones (GL.iNet): NetPulse NO

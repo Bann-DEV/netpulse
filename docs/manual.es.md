@@ -275,7 +275,7 @@ El mapa se construye con el bridge FDB (para clientes por cable), LLDP cuando es
 ### Qué muestra
 
 - **Resumen**: tres contadores (avisos sin leer, alertas de hoy, críticos) con un desglose por causa.
-- **Configuración de alertas**: por categoría, el nivel deseado (Solo urgentes / Todo / Nada) y un gestor de reglas personalizadas.
+- **Configuración de alertas**: por categoría, el nivel de notificación (Solo urgentes / Todo / Nada) y un gestor de reglas personalizadas. Todos los eventos se guardan siempre en el registro, con cualquier nivel; el nivel solo controla qué te notifica.
 - **Filtros**: por severidad, por tipo, por categoría y "Solo no leídas".
 - **Feed en línea de tiempo** agrupado por día, con severidad por color y contexto expandible (minigráfica con umbral, datos del peer WireGuard o del dispositivo afectado).
 
@@ -292,14 +292,14 @@ Las alertas las genera el servidor a partir de lo que ya monitoriza: temperatura
 
 ### Decisiones de diseño
 
-- La configuración es **por categoría y por nivel**, no alerta a alerta: puedes silenciar toda la categoría "Clientes" sin tocar el resto.
+- La configuración es **por categoría y por nivel**, no alerta a alerta: el nivel es una política de notificación (Nada / Solo urgentes / Todo). Los eventos por debajo del nivel siguen registrándose en el log y el feed; para ocultarlos visualmente usa los filtros de categoría del feed.
 - Puedes **silenciar** una alerta concreta 1 hora, 24 horas o para siempre.
 - El **feed usa scroll infinito simulado**: al llegar abajo se muestra el fin del historial.
 
 ### Procedimiento: configurar qué alertas quieres
 
 1. Abre **Alertas** y pulsa **Configuración**.
-2. Para cada categoría (Router, Internet, Clientes, Señal, VPN, Sistema) elige el nivel: **Solo urgentes**, **Todo** o **Nada**.
+2. Para cada categoría (Router, Internet, Clientes, Señal, VPN, Sistema) elige el nivel de notificación: **Solo urgentes**, **Todo** o **Nada**. Con cualquier nivel todos los eventos quedan en el registro y cuentan en la campana; el nivel solo decide cuál envía notificación.
 3. Si necesitas reglas propias (umbrales a medida), usa el gestor de **reglas** al final del panel.
 4. Los cambios se guardan al instante (verás la confirmación).
 
@@ -393,15 +393,24 @@ El plan se calcula con los **scans de vecinos** de cada radio. Aquí hay una dif
 
 ## Actualizaciones de firmware
 
-**Ruta:** `/firmware-upgrades`. Título en la interfaz: **Actualizaciones de firmware**. Marca "labs" y solo administradores.
+**Ruta:** `/firmware-upgrades`. Título en la interfaz: **Actualizaciones de firmware**. Solo administradores.
 
 ### Qué muestra
 
-Una tarjeta por router con los campos del objetivo de actualización (versión actual, versión objetivo, modelo/target, URL de la imagen, checksum SHA256), el estado del último intento y las acciones de actualizar ahora o programar.
+Una tarjeta por router con los campos del objetivo de actualización (versión actual, versión objetivo, modelo/target, URL de la imagen, checksum SHA256), el estado del último intento y las acciones de actualizar ahora o programar. En la parte superior:
+
+- **Refrescar**: vuelve a leer la lista de actualizaciones y sus estados desde el servidor. No sonda los routers por sí mismo; mientras hay una actualización en curso, la página se auto-refresca sola.
+- **Detectar imagen** (en la sección de URL): resuelve la URL de descarga de la imagen oficial de OpenWrt a partir del "Sistema detectado" que reporta el agente (placa, target, versión) para la versión objetivo que hayas escrito. Rellena modelo/target y URL; el checksum sigue teniendo que pegarlo tú.
+- **Comprobar** (el botón de terminal, por unidad): ejecuta `owut check` en ese router y muestra si el servidor ASU puede construir la imagen de actualización. Necesita owut instalado en la unidad (la página ofrece instalarlo si falta).
+
+El desplegable de **versión objetivo** se rellena con las versiones que reporta el propio owut de la unidad; sin owut, el campo es texto libre y nada lo rellena automáticamente.
 
 ### Qué datos necesita
 
-Es un flujo administrado: hay que indicar la URL de la imagen OpenWrt, el modelo/target y, recomendablemente, el checksum SHA256. El agente detecta el sistema del router (modelo, placa, versión, target) y lo muestra como "Sistema detectado" para ayudarte a rellenar los campos.
+Dos motores, elegidos por actualización:
+
+- **URL + checksum**: indicas la URL de la imagen OpenWrt, el modelo/target y, recomendablemente, el checksum SHA256. El agente detecta el sistema del router (modelo, placa, versión, target) y lo muestra como "Sistema detectado" para ayudarte a rellenar los campos.
+- **owut (ASU)**: la unidad ejecuta owut contra el servidor attended-sysupgrade de OpenWrt. Usa **Comprobar** para revisar qué se construiría, **Instalar owut** si la unidad no lo tiene, y **Actualizar ahora** para construir, descargar y flashear la imagen con tus paquetes instalados.
 
 ### Cómo leerlo
 
@@ -412,7 +421,7 @@ Es un flujo administrado: hay que indicar la URL de la imagen OpenWrt, el modelo
 ### Decisiones de diseño
 
 - **Verificación antes de flashear**: si hay checksum y no coincide, la actualización se detiene y el router no se toca. Sin checksum, flashea sin verificar (se te avisa).
-- **Respaldo automático** de la configuración antes de flashear.
+- **Respaldo automático** de la configuración antes de flashear (`sysupgrade -b`). La copia se escribe en el `/tmp` del propio router y su ruta se reporta con el resultado; descárgatela antes de un reinicio si quieres conservarla, porque `/tmp` no sobrevive a uno. El servidor no la copia.
 - Se puede **programar** una actualización desatendida a una hora local concreta (y cancelarla antes de que arranque).
 - El objetivo que se flashea es el **guardado**, no el que tienes a medio editar (el modal resume exactamente lo que se va a flashear).
 

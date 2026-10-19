@@ -82,6 +82,12 @@ func handleFirmwareUpgrade(opts Options, transport http.RoundTripper, data strin
 		reportFirmwareResult(opts, transport, cmd.UpgradeID, false, err.Error(), "", "")
 		return
 	}
+	// #1414: el backup también se sube al server (persistencia real: el /tmp
+	// local no sobrevive al reboot del flash). Best-effort: si falla, el
+	// upgrade continúa con el backup local.
+	if err := uploadBackup(opts, transport, backupPath); err != nil {
+		log.Warn("[netpulse-agent] firmware_upgrade: subida del backup al server falló (continúo)", "err", err)
+	}
 
 	if err := writePendingFirmware(pendingFirmware{UpgradeID: cmd.UpgradeID}); err != nil {
 		log.Error("[netpulse-agent] firmware_upgrade: no se pudo escribir pending", "err", err)
@@ -205,6 +211,33 @@ func currentOpenWrtVersion() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// uploadBackup (#1414) envía el backup de config al server para que lo
+// persista con retención (el /tmp del router se pierde en el reboot del
+// flash). POST crudo con Bearer, mismo contrato que firmware-progress.
+func uploadBackup(opts Options, transport http.RoundTripper, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	req, err := http.NewRequest("POST", opts.Server+"/api/agents/"+opts.Slug+"/firmware-backup", f)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/gzip")
+	req.Header.Set("Authorization", "Bearer "+opts.Token)
+	hc := &http.Client{Transport: transport, Timeout: 60 * time.Second}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func reportFirmwareProgress(opts Options, transport http.RoundTripper, upgradeID int64, status string, percent int, message string) {
