@@ -47,6 +47,51 @@ func TestAgentRegistryMatchRouterByMac(t *testing.T) {
 	}
 }
 
+// #1334: con varios agentes de hostname duplicado (APs puente idénticos), la
+// MAC de bridge decide: es la identidad física autoritativa.
+func TestAgentRegistryMatchRouterPrefersBridgeMacOverAmbiguousHostname(t *testing.T) {
+	reg := NewAgentRegistry(90 * time.Second)
+	now := time.Now()
+	reg.SetClock(func() time.Time { return now })
+
+	first := testPayload()
+	first.Router = "ap-first"
+	first.Data.System.Board.Hostname = "Jidu6401"
+	first.Data.System.BridgeMAC = "AA:AA:AA:AA:AA:01"
+	reg.Ingest(first)
+	second := testPayload()
+	second.Router = "ap-second"
+	second.Data.System.Board.Hostname = "Jidu6401"
+	second.Data.System.BridgeMAC = "AA:AA:AA:AA:AA:02"
+	reg.Ingest(second)
+
+	cfg := RouterConfig{ID: "jidu6401-2", Name: "Jidu6401", Host: "192.168.1.2"}
+	slug, p, fresh := reg.MatchRouter(cfg, map[string]string{cfg.ID: "AA:AA:AA:AA:AA:02"})
+	if !fresh || slug != "ap-second" || p == nil || p.Router != "ap-second" {
+		t.Fatalf("bridge MAC should select the physical AP: slug=%q fresh=%v payload=%v", slug, fresh, p)
+	}
+}
+
+// #1334: un hostname duplicado SIN MAC que lo desambigue no inventa una
+// asociación: mejor no emparejar que emparejar mal.
+func TestAgentRegistryMatchRouterRejectsAmbiguousHostname(t *testing.T) {
+	reg := NewAgentRegistry(90 * time.Second)
+	now := time.Now()
+	reg.SetClock(func() time.Time { return now })
+	for _, slug := range []string{"ap-first", "ap-second"} {
+		pl := testPayload()
+		pl.Router = slug
+		pl.Data.System.Board.Hostname = "Jidu6401"
+		pl.Data.System.BridgeMAC = ""
+		reg.Ingest(pl)
+	}
+
+	cfg := RouterConfig{ID: "jidu6401-2", Name: "Jidu6401", Host: "192.168.1.2"}
+	if slug, payload, fresh := reg.MatchRouter(cfg, nil); slug != "" || payload != nil || fresh {
+		t.Fatalf("ambiguous hostname must not invent an AP: slug=%q payload=%v fresh=%v", slug, payload, fresh)
+	}
+}
+
 func TestAgentRegistryMatchRouterStale(t *testing.T) {
 	reg := NewAgentRegistry(50 * time.Millisecond)
 	now := time.Now()

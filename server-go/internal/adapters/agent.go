@@ -376,13 +376,24 @@ func (r *AgentRegistry) MatchRouter(cfg RouterConfig, macs map[string]string) (s
 		hostNames = append(hostNames, norm(cfg.ID))
 	}
 
-	var match *AgentState
-	var matchSlug string
+	// #1334: la MAC de bridge persistida es la identidad física autoritativa
+	// (los hostnames se duplican en APs puente idénticos). Se recogen TODOS
+	// los candidatos por nivel y solo un match ÚNICO asocia: la ambigüedad no
+	// inventa asociaciones (antes: primer match en orden aleatorio de mapa).
+	targetMac := ""
+	if macs != nil {
+		targetMac = strings.ToUpper(strings.TrimSpace(macs[cfg.ID]))
+	}
+	var macMatch *AgentState
+	var macMatchSlug string
+	macMatchCount := 0
+	var hostMatch *AgentState
+	var hostMatchSlug string
+	hostMatchCount := 0
 	for slug, st := range r.states {
 		if slug == cfg.ID {
-			match = st
-			matchSlug = slug
-			break
+			fresh := r.now().Sub(st.LastSeen) <= r.effectiveTTL(st)
+			return slug, st.Payload, fresh
 		}
 		// #852: el match usa la identidad RETENIDA (Host/BridgeMAC), no la
 		// del payload actual: el último push puede ser wireless-only (evento
@@ -391,31 +402,34 @@ func (r *AgentRegistry) MatchRouter(cfg RouterConfig, macs map[string]string) (s
 		if st.Payload == nil {
 			continue
 		}
+		if targetMac != "" && strings.EqualFold(st.BridgeMAC, targetMac) {
+			macMatchCount++
+			macMatch = st
+			macMatchSlug = slug
+		}
 		if h := norm(st.Host); h != "" {
 			for _, candidate := range hostNames {
 				if h == candidate {
-					match = st
-					matchSlug = slug
+					hostMatchCount++
+					hostMatch = st
+					hostMatchSlug = slug
 					break
 				}
 			}
 		}
-		if match != nil {
-			break
-		}
-		if st.BridgeMAC != "" && macs != nil {
-			if routerMac, ok := macs[cfg.ID]; ok && strings.EqualFold(st.BridgeMAC, routerMac) {
-				match = st
-				matchSlug = slug
-				break
-			}
-		}
 	}
-	if match == nil {
+	if macMatchCount == 1 {
+		fresh := r.now().Sub(macMatch.LastSeen) <= r.effectiveTTL(macMatch)
+		return macMatchSlug, macMatch.Payload, fresh
+	}
+	if macMatchCount > 1 {
 		return "", nil, false
 	}
-	fresh := r.now().Sub(match.LastSeen) <= r.effectiveTTL(match)
-	return matchSlug, match.Payload, fresh
+	if hostMatchCount == 1 {
+		fresh := r.now().Sub(hostMatch.LastSeen) <= r.effectiveTTL(hostMatch)
+		return hostMatchSlug, hostMatch.Payload, fresh
+	}
+	return "", nil, false
 }
 
 // Forget borra el estado del slug (revocación de token).

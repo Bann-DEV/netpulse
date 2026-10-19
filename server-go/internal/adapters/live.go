@@ -1763,6 +1763,12 @@ func (l *Live) pollAll(ctx context.Context) map[string]*routerPolled {
 			// sondee bien en el tick actual.
 			if l.db != nil && res.p.brMac != "" {
 				_, _ = l.db.Exec("UPDATE routers SET mac = ? WHERE id = ?", res.p.brMac, res.cfg.ID)
+				if res.p.brMac != "" {
+					// #1334: la identidad MAC también se actualiza EN PROCESO;
+					// el write a BD solo era útil tras un reinicio, y el
+					// matching de agentes (MatchRouter) la consulta en vivo.
+					l.routerMacs[res.cfg.ID] = res.p.brMac
+				}
 			}
 			// Router recuperado (offline→online, SPEC-ALERTAS §1). issue #846:
 			// con incidente abierto la recuperación debe estabilizarse antes
