@@ -138,15 +138,15 @@ func pairs(vars map[string]string) []string {
 	return out
 }
 
-// Localize devuelve una copia del evento con title/description/hint en el
-// idioma efectivo, compuestos desde el catálogo de ese idioma. Cae a los
-// literales del server (inglés canónico, #1014) si el evento no tiene type,
-// falta la clave o no hay catálogo: nunca peor que el literal nativo.
-func Localize(ev alerts.AlertEvent, kv KV) alerts.AlertEvent {
-	if ev.Type == "" {
+// LocalizeLang es el núcleo de Localize con el idioma EXPLÍCITO. Permite
+// traducir un evento a un idioma concreto por suscriptor (#1334: el idioma
+// efectivo de la UI en el alta de la suscripción de push), sin depender del
+// ajuste global. Idioma no soportado o evento sin type: se devuelve tal cual.
+func LocalizeLang(ev alerts.AlertEvent, lang string) alerts.AlertEvent {
+	if ev.Type == "" || !supported[lang] {
 		return ev
 	}
-	c := load(Lang(kv))
+	c := load(lang)
 	if c == nil {
 		return ev
 	}
@@ -171,6 +171,14 @@ func Localize(ev alerts.AlertEvent, kv KV) alerts.AlertEvent {
 		}
 	}
 	return out
+}
+
+// Localize devuelve una copia del evento con title/description/hint en el
+// idioma efectivo, compuestos desde el catálogo de ese idioma. Cae a los
+// literales del server (inglés canónico, #1014) si el evento no tiene type,
+// falta la clave o no hay catálogo: nunca peor que el literal nativo.
+func Localize(ev alerts.AlertEvent, kv KV) alerts.AlertEvent {
+	return LocalizeLang(ev, Lang(kv))
 }
 
 // notifier traduce cada evento antes de pasarlo a la cadena real.

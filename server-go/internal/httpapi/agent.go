@@ -700,34 +700,46 @@ type routerIdentity struct {
 }
 
 // resolveAgentRouter devuelve el id del router asociado a un agente. Primero
-// intenta slug == router.id; si no, empareja por hostname del board del
-// payload o por bridge MAC persistida (#282).
+// intenta slug == router.id; si no, empareja por bridge MAC persistida y solo
+// usa un hostname de board cuando es único (#1334): el hostname suele estar
+// duplicado en APs puente idénticos y un match ambiguo no debe inventar una
+// asociación. La MAC es la identidad física autoritativa.
 func resolveAgentRouter(slug string, payload *probe.Payload, routers map[string]routerIdentity) string {
 	if slug != "" {
 		if _, ok := routers[slug]; ok {
 			return slug
 		}
 	}
-	if payload == nil || payload.Data.System == nil || payload.Data.System.Board == nil {
+	if payload == nil || payload.Data.System == nil {
+		return ""
+	}
+	if payload.Data.System.BridgeMAC != "" {
+		for _, r := range routers {
+			if r.Mac != "" && strings.EqualFold(payload.Data.System.BridgeMAC, r.Mac) {
+				return r.ID
+			}
+		}
+	}
+	if payload.Data.System.Board == nil {
 		return ""
 	}
 	norm := func(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 	hostname := norm(payload.Data.System.Board.Hostname)
-	if hostname != "" {
-		for _, r := range routers {
-			if hostname == norm(r.Host) || hostname == norm(r.Name) {
-				return r.ID
+	if hostname == "" {
+		return ""
+	}
+	match := ""
+	for _, r := range routers {
+		if hostname == norm(r.Host) || hostname == norm(r.Name) {
+			if match != "" {
+				// Hostname duplicado (APs puente idénticos): un hostname
+				// ambiguo no se usa para inventar una asociación.
+				return ""
 			}
+			match = r.ID
 		}
 	}
-	if payload.Data.System.BridgeMAC != "" {
-		for _, r := range routers {
-			if strings.EqualFold(payload.Data.System.BridgeMAC, r.Mac) {
-				return r.ID
-			}
-		}
-	}
-	return ""
+	return match
 }
 
 // handleAgentsDelete: revoca el token del slug (el agente recibirá 401 en su

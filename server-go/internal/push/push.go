@@ -30,6 +30,12 @@ type Subscription struct {
 	P256dh    string
 	UserAgent string
 	CreatedAt int64 // epoch ms (convención del resto de la DB)
+	// UserID: dueño autenticado de la suscripción (#1334); 0 = suscripción
+	// legacy sin dueño (se conserva y sigue recibiendo).
+	UserID int64
+	// Language: idioma efectivo de la UI en el alta (#1334); "" = legacy (el
+	// push sale en el idioma global del server, comportamiento anterior).
+	Language string
 }
 
 // EnsureVAPIDKeys devuelve (public, private) del par VAPID; si no existe en
@@ -75,12 +81,20 @@ func UpsertSubscription(d *db.DB, s Subscription) (created bool, err error) {
 	if s.CreatedAt == 0 {
 		s.CreatedAt = db.NowMS()
 	}
-	_, err = d.Exec(`INSERT INTO push_subscriptions (endpoint, keys_auth, keys_p256dh, user_agent, created_at)
-		VALUES (?, ?, ?, ?, ?)
+	_, err = d.Exec(`INSERT INTO push_subscriptions (endpoint, keys_auth, keys_p256dh, user_agent, created_at, user_id, language)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(endpoint) DO UPDATE SET keys_auth=excluded.keys_auth,
-			keys_p256dh=excluded.keys_p256dh, user_agent=excluded.user_agent`,
-		s.Endpoint, s.Auth, s.P256dh, s.UserAgent, s.CreatedAt)
+			keys_p256dh=excluded.keys_p256dh, user_agent=excluded.user_agent,
+			user_id=excluded.user_id, language=excluded.language`,
+		s.Endpoint, s.Auth, s.P256dh, s.UserAgent, s.CreatedAt, nullableUserID(s.UserID), s.Language)
 	return created, err
+}
+
+func nullableUserID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
 }
 
 // DeleteSubscription borra por endpoint (idempotente: no error si no existe).
@@ -91,7 +105,7 @@ func DeleteSubscription(d *db.DB, endpoint string) error {
 
 // ListSubscriptions devuelve todas las suscripciones registradas.
 func ListSubscriptions(d *db.DB) ([]Subscription, error) {
-	rows, err := d.Query("SELECT endpoint, keys_auth, keys_p256dh, user_agent, created_at FROM push_subscriptions")
+	rows, err := d.Query("SELECT endpoint, keys_auth, keys_p256dh, user_agent, created_at, user_id, language FROM push_subscriptions")
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +114,18 @@ func ListSubscriptions(d *db.DB) ([]Subscription, error) {
 	for rows.Next() {
 		var s Subscription
 		var ua sql.NullString
-		if err := rows.Scan(&s.Endpoint, &s.Auth, &s.P256dh, &ua, &s.CreatedAt); err != nil {
+		var userID sql.NullInt64
+		var language sql.NullString
+		if err := rows.Scan(&s.Endpoint, &s.Auth, &s.P256dh, &ua, &s.CreatedAt, &userID, &language); err != nil {
 			return nil, err
 		}
 		s.UserAgent = ua.String
+		if userID.Valid {
+			s.UserID = userID.Int64
+		}
+		if language.Valid {
+			s.Language = language.String
+		}
 		out = append(out, s)
 	}
 	return out, rows.Err()

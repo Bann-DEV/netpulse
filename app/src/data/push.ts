@@ -3,7 +3,7 @@
  *
  * Contrato con el backend (server-go, tras auth de sesión):
  * - GET  /api/push/vapid-key   → {"key":"<base64url>"}  (clave pública VAPID)
- * - POST /api/push/subscribe   body {endpoint, keys:{auth,p256dh}} → 201/200
+ * - POST /api/push/subscribe   body {endpoint, keys:{auth,p256dh}, language} → 201/200
  * - POST /api/push/unsubscribe body {endpoint} → 204
  *
  * En la demo local (sin backend) la tarjeta de Ajustes NO simula la
@@ -16,6 +16,8 @@
 export interface PushSubscriptionPayload {
   endpoint: string
   keys: { auth: string; p256dh: string }
+  /** Idioma efectivo de la UI (#1334); el push se compone en este idioma. */
+  language: 'es' | 'en'
 }
 
 function redirectLogin(): never {

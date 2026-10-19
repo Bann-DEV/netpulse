@@ -573,6 +573,9 @@ func Open(dataDir string, opts ...OpenOption) (*DB, error) {
 	// Migraciones tolerantes (ALTER solo si falta la columna; errores tragados)
 	migrate(sqldb, "sessions", "ua", "ALTER TABLE sessions ADD COLUMN ua TEXT")
 	migrate(sqldb, "sessions", "user_id", "ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+	// #1334: dueño autenticado e idioma efectivo de la UI por suscripción push.
+	migrate(sqldb, "push_subscriptions", "user_id", "ALTER TABLE push_subscriptions ADD COLUMN user_id INTEGER")
+	migrate(sqldb, "push_subscriptions", "language", "ALTER TABLE push_subscriptions ADD COLUMN language TEXT")
 	migrate(sqldb, "users", "language", "ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'auto'")
 	// SPEC-65 D65-5: nombre visible por usuario ("" = usar el username).
 	migrate(sqldb, "users", "display_name", "ALTER TABLE users ADD COLUMN display_name TEXT DEFAULT ''")
