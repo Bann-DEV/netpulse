@@ -5,6 +5,26 @@ Todos los cambios notables de NetPulse se documentan en este fichero.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [2.45.0] - 2026-10-19
+
+### Added
+
+- **Actualizaciones de firmware a tu manera (#1414)**: cada unidad elige su método — owut (ASU), imagen por URL o **subida local** de una imagen construida fuera (el server la guarda, calcula el sha256 y la flashea verificada). El flujo owut gana pasos explícitos: *check* para revisar qué cambiaría, *download* para construir y bajar la imagen al router sin flashear, e *install* para flashear la descargada; el "Actualizar ahora" de siempre sigue ahí para quien quiere todo en uno.
+- **Copia de configuración en el server, no en el olvido (#1414)**: antes el backup de `sysupgrade -b` se quedaba en el `/tmp` del router y moría con el reinicio. Ahora el agente (3.0.18) lo sube al server antes de flashear: se conservan las 5 últimas por unidad y se descargan desde la propia tarjeta de firmware.
+- **Push en tu idioma, por suscriptor (#1334)**: cada suscripción de push recuerda el idioma en que estaba la interfaz al darse de alta y la notificación se compone en ese idioma. Y las suscripciones tienen dueño: dar de baja solo borra la tuya.
+- **Emparejamiento de agentes con criterio físico (#1334)**: cuando varios APs puente idénticos comparten hostname, la MAC de bridge decide (es la identidad física); un hostname ambiguo ya no inventa una asociación, y la MAC aprendida en un sondeo se usa en caliente sin esperar a un reinicio.
+
+### Changed
+
+- **Los niveles de alerta son política de notificación, no de visibilidad (#1413)**: antes, poner una categoría en "Solo urgentes" hacía desaparecer lo demás del registro. Ahora todo se guarda siempre en el log y en el feed; el nivel solo decide qué notifica. Para ocultar categorías visualmente están los filtros del feed.
+- **Alerta de firmware: un episodio por unidad (#1411, #1412)**: la alerta de "firmware desactualizado" deja de re-dispararse cada 5 minutos: se abre una vez por unidad, se actualiza si cambia la versión o el objetivo, y se resuelve sola cuando coinciden. La comparación ahora entiende versiones (25.12.6 > 25.12.5) y un objetivo **más viejo** que lo instalado alerta aparte como posible downgrade, no como "hay actualización".
+- **Manual de firmware a la par de la página (#1415)**: documentados el botón de refrescar, el de detectar imagen, el `>_ check` de owut y dónde vive de verdad la copia de configuración.
+
+### Fixed
+
+- **Topología: todos los switches, no solo tres (#1422)** y **clientes de unidades en el borde hacia dentro (#1416)**: el mapa ya no descarta los switches gestionados a partir del cuarto (se reparten en la tangente del hueco libre) y las unidades pegadas a un lateral abanican sus clientes hacia el centro del lienzo en vez de fuera.
+- **SSID impostor: tu propia flota ya no se denuncia sola (#1402)**: una unidad cuyo agente no reporta sus BSSIDs propios se reconoce ahora por su MAC de flota y las de sus radios derivadas.
+
 ## [2.44.0] - 2026-10-18
 
 ### Added
@@ -20,6 +40,7 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 - Landing pública (#1403, #1404, #1405, #1406): las tarjetas de /features se pliegan en filas compactas con frase de gancho (el detalle se despliega al clic), la sección de instalar va a ancho completo con columnas internas, las capturas EN muestran la app en inglés de verdad y el dataset del demo se anuncia como 65 dispositivos (era lo que dice el test, no 67). Sin cambios en el binario.
 
+## [2.43.0] - 2026-10-14
 
 ### Added
 
