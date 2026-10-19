@@ -2284,7 +2284,10 @@
     "owutDownload": "Descargar imagen",
     "owutDownloading": "Construyendo y descargando...",
     "owutDownloadOutput": "salida de owut download",
-    "owutInstallImage": "Instalar imagen descargada"
+    "owutInstallImage": "Instalar imagen descargada",
+    "backupsTitle": "Copias de configuración en el servidor",
+    "backupsEmpty": "Todavía no hay copias. Se sube una automáticamente antes de cada flasheo.",
+    "backupsDownload": "Descargar"
   },
   "orchestration": {
     "title": "Orquestación",

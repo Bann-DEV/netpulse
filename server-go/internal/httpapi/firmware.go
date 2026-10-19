@@ -53,6 +53,8 @@ func (s *server) registerFirmwareRoutes(mux *http.ServeMux) {
 	s.registerFirmwareOwutRoutes(mux)
 	// Método por unidad + imagen subida desde local (#1414).
 	s.registerFirmwareUploadRoutes(mux)
+	// Backups de config en el server (#1414).
+	s.registerFirmwareBackupRoutes(mux)
 
 	mux.Handle("GET /api/firmware-upgrades", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.db == nil {

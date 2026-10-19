@@ -147,6 +147,23 @@ export default function FirmwareUpgrades() {
   const [owutDlOutput, setOwutDlOutput] = useState<Record<string, string>>({})
   const [uploadBusy, setUploadBusy] = useState<Record<string, boolean>>({})
   const [uploadInfo, setUploadInfo] = useState<Record<string, { name: string; size: number; checksum: string }>>({})
+  // #1414: backups de config en el server (lista perezosa por tarjeta).
+  const [fwBackups, setFwBackups] = useState<Record<string, { name: string; size: number; ts: number }[]>>({})
+  const [fwBackupsLoaded, setFwBackupsLoaded] = useState<Record<string, boolean>>({})
+
+  const loadFwBackups = async (id: string) => {
+    if (fwBackupsLoaded[id]) return
+    setFwBackupsLoaded((prev) => ({ ...prev, [id]: true }))
+    try {
+      const res = await fetch(`/api/firmware-backups/${encodeURIComponent(id)}`)
+      if (!res.ok) return
+      const body = (await res.json()) as { name: string; size: number; ts: number }[]
+      setFwBackups((prev) => ({ ...prev, [id]: body }))
+    } catch {
+      /* el bloque queda vacío; se reintenta al replegar de nuevo */
+      setFwBackupsLoaded((prev) => ({ ...prev, [id]: false }))
+    }
+  }
   const [versionsBusy, setVersionsBusy] = useState<Record<string, boolean>>({})
   const [installBusy, setInstallBusy] = useState<Record<string, boolean>>({})
   const [owutConfirmId, setOwutConfirmId] = useState<string | null>(null)
@@ -1047,8 +1064,36 @@ export default function FirmwareUpgrades() {
                 </div>
               )}
 
-              {item.upgrade?.error && (
-                <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-400">
+              <details
+                className="mt-3 rounded-lg border border-border bg-canvas px-3 py-2"
+                onToggle={(ev) => {
+                  if ((ev.target as HTMLDetailsElement).open) void loadFwBackups(item.routerId)
+                }}
+              >
+                <summary className="cursor-pointer text-sm font-medium text-text-secondary">
+                  {t('firmwareUpgrades.backupsTitle')}
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {(fwBackups[item.routerId] ?? []).length === 0 && (
+                    <li className="text-xs text-text-muted">{t('firmwareUpgrades.backupsEmpty')}</li>
+                  )}
+                  {(fwBackups[item.routerId] ?? []).map((b) => (
+                    <li key={b.name} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate text-text-secondary">
+                        {new Date(b.ts * 1000).toLocaleString()} · {Math.round((b.size / 1024) * 10) / 10} KB
+                      </span>
+                      <a
+                        href={`/api/firmware-backups/${encodeURIComponent(item.routerId)}/file?name=${encodeURIComponent(b.name)}`}
+                        className="shrink-0 font-medium text-accent hover:underline"
+                      >
+                        {t('firmwareUpgrades.backupsDownload')}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+
+              {item.upgrade?.error && (                <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-400">
                   {/* Timestamp del fallo: un error antiguo NO debe leerse como
                       estado presente del agente (feedback #477). */}
                   <span>

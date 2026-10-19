@@ -2284,7 +2284,10 @@
     "owutDownload": "Download image",
     "owutDownloading": "Building and downloading...",
     "owutDownloadOutput": "owut download output",
-    "owutInstallImage": "Install downloaded image"
+    "owutInstallImage": "Install downloaded image",
+    "backupsTitle": "Config backups on the server",
+    "backupsEmpty": "No backups yet. One is uploaded automatically before each flash.",
+    "backupsDownload": "Download"
   },
   "orchestration": {
     "title": "Orchestration",
