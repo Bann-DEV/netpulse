@@ -6,28 +6,33 @@ import (
 	"testing"
 )
 
-// TestFirmwareOutdated cubre la comparación pura (issue #241): Contains
-// normalizado en minúsculas sobre la descripción del firmware.
-func TestFirmwareOutdated(t *testing.T) {
+// TestFirmwareCompare cubre la comparación pura (issues #241 y #1412): con
+// versiones parseables compara componente a componente; si no, cae al
+// Contains insensible a mayúsculas (resultado fwAmbiguous).
+func TestFirmwareCompare(t *testing.T) {
 	cases := []struct {
 		name      string
 		installed string
 		target    string
-		want      bool
+		want      int
 	}{
-		{"sin target", "OpenWrt 23.05.5", "", false},
-		{"target solo espacios", "OpenWrt 23.05.5", "   ", false},
-		{"coincide exacto", "23.05.5", "23.05.5", false},
-		{"coincide dentro de descripción", "OpenWrt 25.12.5 r33051-abc", "25.12.5", false},
-		{"coincide sin distinguir mayúsculas", "OpenWrt 25.12.5", "OPENWRT 25.12.5", false},
-		{"no coincide", "OpenWrt 23.05.5", "24.10.1", true},
-		{"instalado vacío", "", "24.10.1", true},
-		{"target con espacios alrededor", "OpenWrt 23.05.5", " 23.05.5 ", false},
+		{"sin target", "OpenWrt 23.05.5", "", fwMatch},
+		{"target solo espacios", "OpenWrt 23.05.5", "   ", fwMatch},
+		{"coincide exacto", "23.05.5", "23.05.5", fwMatch},
+		{"coincide dentro de descripción", "OpenWrt 25.12.5 r33051-abc", "25.12.5", fwMatch},
+		{"target más nuevo", "OpenWrt 25.12.5 r33051-abc", "25.12.6", fwNewer},
+		{"target más viejo (downgrade)", "OpenWrt 25.12.5 r33051-abc", "25.12.4", fwOlder},
+		{"salto de major", "OpenWrt 23.05.5 r20134-abc", "24.10.1", fwNewer},
+		{"minor con patch", "OpenWrt 24.10.0", "24.10.1", fwNewer},
+		{"target con major y minor", "OpenWrt 25.12.5", "25.13", fwNewer},
+		{"instalado vacío", "", "24.10.1", fwAmbiguous},
+		{"target con espacios alrededor", "OpenWrt 23.05.5", " 23.05.5 ", fwMatch},
+		{"target no parseable legacy", "OpenWrt 23.05.5", "snapshot", fwAmbiguous},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := firmwareOutdated(c.installed, c.target); got != c.want {
-				t.Fatalf("firmwareOutdated(%q, %q) = %v, esperaba %v", c.installed, c.target, got, c.want)
+			if got := firmwareCompare(c.installed, c.target); got != c.want {
+				t.Fatalf("firmwareCompare(%q, %q) = %d, esperaba %d", c.installed, c.target, got, c.want)
 			}
 		})
 	}
@@ -111,6 +116,82 @@ func TestBuildRouterFirmwareTarget(t *testing.T) {
 	}
 	if n := len(l3.AlertsEngine().List()); n != 0 {
 		t.Fatalf("alertas=%d, esperaba 0", n)
+	}
+}
+
+// TestBuildRouterFirmwareDowngrade (#1412): un target MÁS VIEJO que lo
+// instalado alerta con wording propio, NO marca FirmwareOutdated y NO
+// penaliza la salud.
+func TestBuildRouterFirmwareDowngrade(t *testing.T) {
+	l := NewLive(nil, nil, []RouterConfig{{ID: "g", Host: "192.168.8.1", IsGateway: true}}, nil)
+	p := &routerPolled{
+		cfg:   RouterConfig{ID: "r5", Name: "Salón", Host: "192.168.8.2", FirmwareTarget: "25.12.4"},
+		board: boardWithDesc("OpenWrt 25.12.5 r33051-abc"),
+	}
+	r := l.buildRouter(p, nil)
+	if r.FirmwareOutdated {
+		t.Fatalf("downgrade no debe marcar FirmwareOutdated: %+v", r)
+	}
+	if r.Health != 100 {
+		t.Fatalf("Health=%d, esperaba 100 (el downgrade no penaliza como desactualizado)", r.Health)
+	}
+	list := l.AlertsEngine().List()
+	if len(list) != 1 {
+		t.Fatalf("alertas=%d, esperaba 1", len(list))
+	}
+	ev := list[0]
+	if ev.Title != "Firmware downgrade target" || ev.Type != "firmware-downgrade-target" {
+		t.Fatalf("alerta de downgrade mal formada: %+v", ev)
+	}
+	if !strings.Contains(ev.Description, "25.12.4") || !strings.Contains(ev.Description, "25.12.5") {
+		t.Fatalf("Description=%q", ev.Description)
+	}
+}
+
+// TestBuildRouterFirmwareOncePerUnit (#1411): la alerta de firmware es UN
+// episodio por unidad. Re-sondar la misma condición no re-firea; cambiar la
+// versión o el target actualiza la misma alerta; al coincidir se resuelve.
+func TestBuildRouterFirmwareOncePerUnit(t *testing.T) {
+	l := NewLive(nil, nil, []RouterConfig{{ID: "g", Host: "192.168.8.1", IsGateway: true}}, nil)
+	p := &routerPolled{
+		cfg:   RouterConfig{ID: "r6", Name: "Salón", Host: "192.168.8.2", FirmwareTarget: "25.12.6"},
+		board: boardWithDesc("OpenWrt 25.12.5 r33051-abc"),
+	}
+	l.buildRouter(p, nil)
+	l.buildRouter(p, nil) // mismo ciclo: sin re-fire
+	list := l.AlertsEngine().List()
+	if len(list) != 1 {
+		t.Fatalf("alertas=%d tras re-sondar, esperaba 1 (episodio único)", len(list))
+	}
+	if list[0].ID != "alert-firmware-r6" {
+		t.Fatalf("ID=%q, esperaba ID estable alert-firmware-r6", list[0].ID)
+	}
+	// Cambia el target: misma alerta actualizada en sitio, no una copia.
+	p.cfg.FirmwareTarget = "25.13.0"
+	l.buildRouter(p, nil)
+	list = l.AlertsEngine().List()
+	if len(list) != 1 || !strings.Contains(list[0].Description, "25.13.0") {
+		t.Fatalf("tras cambio de target: %d alertas, %+v", len(list), list)
+	}
+	// Cambia la versión instalada: episodio nuevo en la misma alerta.
+	p.board = boardWithDesc("OpenWrt 25.12.7 r33051-abc")
+	l.buildRouter(p, nil)
+	list = l.AlertsEngine().List()
+	if len(list) != 1 || !strings.Contains(list[0].Description, "25.12.7") {
+		t.Fatalf("tras cambio de versión: %d alertas, %+v", len(list), list)
+	}
+	// El firmware alcanza el target: la alerta se resuelve y sale del feed.
+	p.cfg.FirmwareTarget = "25.12.7"
+	l.buildRouter(p, nil)
+	if n := len(l.AlertsEngine().List()); n != 0 {
+		t.Fatalf("alertas=%d tras resolver, esperaba 0", n)
+	}
+	// Reincidencia (mismatch otra vez): el mismo ID vuelve a alertar.
+	p.cfg.FirmwareTarget = "25.12.8"
+	l.buildRouter(p, nil)
+	list = l.AlertsEngine().List()
+	if len(list) != 1 || list[0].ID != "alert-firmware-r6" {
+		t.Fatalf("reincidencia: %d alertas, %+v", len(list), list)
 	}
 }
 

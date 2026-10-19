@@ -293,6 +293,10 @@
       "snmp-recovered": {
         "title": "SNMP polling recovered on {{router}}",
         "description": "SNMP polling for {{router}} is responding again"
+      },
+      "firmware-downgrade-target": {
+        "title": "Firmware downgrade target",
+        "description": "{{router}}: the configured target \"{{target}}\" is older than the installed firmware \"{{firmware}}\""
       }
     },
     "viewDevice": "View device",

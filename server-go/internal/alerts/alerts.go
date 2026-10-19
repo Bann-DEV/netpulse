@@ -97,25 +97,28 @@ type AlertEvent struct {
 
 // Stable alert-type slugs (issue #310): keys of the Hints map.
 const (
-	HintAgentDown     = "agent-down"
-	HintAgentDownSSH  = "agent-down-ssh" // variante: satélite degrada a SSH (#671)
-	HintGatewayUnrch  = "gateway-unreachable"
-	HintHighTemp      = "high-temperature"
-	HintPortFlapping  = "port-flapping"
-	HintDeviceOffline = "device-offline"
-	HintUnknownDevice = "unknown-device"
-	HintSsidImpostor  = "wifi-ssid-impostor"
+	HintAgentDown       = "agent-down"
+	HintAgentDownSSH    = "agent-down-ssh" // variante: satélite degrada a SSH (#671)
+	HintGatewayUnrch    = "gateway-unreachable"
+	HintHighTemp        = "high-temperature"
+	HintPortFlapping    = "port-flapping"
+	HintDeviceOffline   = "device-offline"
+	HintUnknownDevice   = "unknown-device"
+	HintSsidImpostor    = "wifi-ssid-impostor"
 	HintNewNeighborSsid = "new-neighbor-ssid"
 	HintNewClient       = "new-client"
-	HintFirmware      = "firmware-outdated"
-	HintWanDown       = "wan-down"
-	HintWifiWeak      = "wifi-weak"
-	HintGhostPort     = "ghost-port"
-	HintDegradedLink  = "degraded-link"
-	HintAgentOutdated = "agent-outdated"
-	HintWanSlow       = "wan-slow"
-	HintUplinkSwitch  = "uplink-switched"
-	HintSnmpFailing   = "snmp-failing"
+	HintFirmware        = "firmware-outdated"
+	// #1412: el target configurado es MÁS VIEJO que lo instalado (posible
+	// downgrade, casi siempre un target mal puesto).
+	HintFirmwareDowngrade = "firmware-downgrade-target"
+	HintWanDown           = "wan-down"
+	HintWifiWeak          = "wifi-weak"
+	HintGhostPort         = "ghost-port"
+	HintDegradedLink      = "degraded-link"
+	HintAgentOutdated     = "agent-outdated"
+	HintWanSlow           = "wan-slow"
+	HintUplinkSwitch      = "uplink-switched"
+	HintSnmpFailing       = "snmp-failing"
 )
 
 // Additional stable alert-type slugs (issue #712): recovery/info/beacon/rearmer
@@ -155,25 +158,26 @@ const (
 // The canonical language is English (#1014): alertlang and the web feed swap
 // it for the catalog wording when the target language is Spanish.
 var Hints = map[string]string{
-	HintAgentDown:     "Check the router power and connection; if it does not recover, reinstall the agent from LuCI.",
-	HintAgentDownSSH:  "Check the router's power and connection; if it doesn't recover, reinstall the agent from LuCI.",
-	HintGatewayUnrch:  "Check the connection between the gateway and the rest of the network.",
-	HintHighTemp:      "Improve ventilation and keep the router away from heat sources.",
-	HintPortFlapping:  "Check the cable or switch port: an unstable link is usually the culprit.",
-	HintDeviceOffline: "Verify the device power and network cable.",
-	HintUnknownDevice: "If you do not recognize it, block it or mark it as trusted in Settings.",
-	HintSsidImpostor:  "An unknown radio is broadcasting your network name. Check the area around the hearing AP; if you do not recognize the BSSID, treat it as a rogue AP.",
-	HintNewNeighborSsid: "A new network name has been broadcasting nearby for hours. If it is not yours, find out what it is (a new router, an IoT device in pairing mode, a hotspot); if it is a permanent neighbor you do not care about, dismiss the alert - it will not repeat.",
-	HintNewClient:       "A device just joined the network for the first time. If you recognize it, name it or mark it as trusted in Settings; if not, check what it is.",
-	HintFirmware:      "Your router has newer firmware available; check Firmware upgrades (Labs) or LuCI.",
-	HintWanDown:       "Check the modem/ONT and contact your ISP if the outage persists.",
-	HintWifiWeak:      "Move the device closer to an access point or relocate the AP.",
-	HintGhostPort:     "Check the cable and the connected device: an active port that goes silent usually means a loose cable or a powered-off device.",
-	HintDegradedLink:  "Check the cable and connectors: a degraded link is often a sign of a damaged cable or a loose connector.",
-	HintAgentOutdated: "Update the agent from Settings, Agents (Update button); if it's a NetGrip panel, update it from its own panel.",
-	HintUplinkSwitch:  "Check the line that dropped: the router goes back to it on its own once it recovers.",
-	HintWanSlow:       "Restart the router and the modem/ONT and run the test again; if it stays low, contact your ISP (line degradation or congestion in your area).",
-	HintSnmpFailing:   "Check the SNMP community string and switch port: the device answers ping but not polling.",
+	HintAgentDown:         "Check the router power and connection; if it does not recover, reinstall the agent from LuCI.",
+	HintAgentDownSSH:      "Check the router's power and connection; if it doesn't recover, reinstall the agent from LuCI.",
+	HintGatewayUnrch:      "Check the connection between the gateway and the rest of the network.",
+	HintHighTemp:          "Improve ventilation and keep the router away from heat sources.",
+	HintPortFlapping:      "Check the cable or switch port: an unstable link is usually the culprit.",
+	HintDeviceOffline:     "Verify the device power and network cable.",
+	HintUnknownDevice:     "If you do not recognize it, block it or mark it as trusted in Settings.",
+	HintSsidImpostor:      "An unknown radio is broadcasting your network name. Check the area around the hearing AP; if you do not recognize the BSSID, treat it as a rogue AP.",
+	HintNewNeighborSsid:   "A new network name has been broadcasting nearby for hours. If it is not yours, find out what it is (a new router, an IoT device in pairing mode, a hotspot); if it is a permanent neighbor you do not care about, dismiss the alert - it will not repeat.",
+	HintNewClient:         "A device just joined the network for the first time. If you recognize it, name it or mark it as trusted in Settings; if not, check what it is.",
+	HintFirmware:          "Your router has newer firmware available; check Firmware upgrades (Labs) or LuCI.",
+	HintFirmwareDowngrade: "The configured target is older than the installed firmware; fix the target version in the fleet unit settings.",
+	HintWanDown:           "Check the modem/ONT and contact your ISP if the outage persists.",
+	HintWifiWeak:          "Move the device closer to an access point or relocate the AP.",
+	HintGhostPort:         "Check the cable and the connected device: an active port that goes silent usually means a loose cable or a powered-off device.",
+	HintDegradedLink:      "Check the cable and connectors: a degraded link is often a sign of a damaged cable or a loose connector.",
+	HintAgentOutdated:     "Update the agent from Settings, Agents (Update button); if it's a NetGrip panel, update it from its own panel.",
+	HintUplinkSwitch:      "Check the line that dropped: the router goes back to it on its own once it recovers.",
+	HintWanSlow:           "Restart the router and the modem/ONT and run the test again; if it stays low, contact your ISP (line degradation or congestion in your area).",
+	HintSnmpFailing:       "Check the SNMP community string and switch port: the device answers ping but not polling.",
 }
 
 // HintFor returns the suggestion for a slug, or "" when it does not exist.

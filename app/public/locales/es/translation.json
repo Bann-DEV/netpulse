@@ -293,6 +293,10 @@
       "snmp-recovered": {
         "title": "Sondeo SNMP recuperado en {{router}}",
         "description": "{{router}} vuelve a responder al sondeo SNMP"
+      },
+      "firmware-downgrade-target": {
+        "title": "Target de firmware inferior",
+        "description": "{{router}}: el target configurado \"{{target}}\" es más viejo que el firmware instalado \"{{firmware}}\""
       }
     },
     "viewDevice": "Ver dispositivo",
