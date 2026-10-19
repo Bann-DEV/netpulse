@@ -2269,7 +2269,22 @@
     "successTitle": "¡Actualización completada!",
     "successBody": "El router quedó en {{to}} en {{dur}} s: reinició y volvió solo, con los paquetes al día. Si excluiste algún paquete del stack, comprueba que su servicio sigue activo.",
     "successDismiss": "Entendido",
-    "compatibleNote": "Solo se muestran dispositivos con OpenWrt; los GL.iNet se actualizan por su propia vía."
+    "compatibleNote": "Solo se muestran dispositivos con OpenWrt; los GL.iNet se actualizan por su propia vía.",
+    "method": "Método de actualización",
+    "methodAuto": "Auto (mostrar todo)",
+    "methodOwut": "owut (ASU)",
+    "methodUrl": "URL de imagen",
+    "methodUpload": "Subida local",
+    "uploadTitle": "Subir una imagen",
+    "uploadHint": "Construye la imagen con el asistente ASU de OpenWrt (o descárgatela) y súbela aquí. NetPulse la guarda en el servidor y la flashea con checksum verificado.",
+    "uploadBusy": "Subiendo...",
+    "uploadedInfo": "Subida: {{name}} ({{size}} MB). Pulsa Actualizar ahora para flashearla.",
+    "uploadedSaved": "Hay una imagen subida guardada como objetivo. Pulsa Actualizar ahora para flashearla.",
+    "checkTooltip": "Ejecuta 'owut check' en el router: qué cambiaría una actualización sin cambiar nada",
+    "owutDownload": "Descargar imagen",
+    "owutDownloading": "Construyendo y descargando...",
+    "owutDownloadOutput": "salida de owut download",
+    "owutInstallImage": "Instalar imagen descargada"
   },
   "orchestration": {
     "title": "Orquestación",
