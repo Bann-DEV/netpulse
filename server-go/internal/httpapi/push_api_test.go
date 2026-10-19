@@ -57,8 +57,8 @@ func TestPushEndpointsContract(t *testing.T) {
 		return n
 	}
 
-	// POST subscribe: 201 la primera vez.
-	body := `{"endpoint":"https://push.example/abc","keys":{"auth":"a1","p256dh":"p1"}}`
+	// POST subscribe: 201 la primera vez. #1334: language (es|en) obligatorio.
+	body := `{"endpoint":"https://push.example/abc","keys":{"auth":"a1","p256dh":"p1"},"language":"en"}`
 	res = doJSON(t, "POST", ts.URL, "/api/push/subscribe", cookie, body)
 	if res.StatusCode != 201 {
 		t.Fatalf("subscribe nuevo: %d, esperaba 201", res.StatusCode)
@@ -67,8 +67,14 @@ func TestPushEndpointsContract(t *testing.T) {
 	if count() != 1 {
 		t.Fatalf("suscripciones: %d, esperaba 1", count())
 	}
+	// #1334: dueño e idioma persistidos.
+	var uid int64
+	var lang string
+	if err := ts.db.QueryRow("SELECT user_id, language FROM push_subscriptions WHERE endpoint = ?", "https://push.example/abc").Scan(&uid, &lang); err != nil || uid == 0 || lang != "en" {
+		t.Fatalf("subscribe no persistió user_id/language: uid=%d lang=%q err=%v", uid, lang, err)
+	}
 	// Upsert del mismo endpoint (claves nuevas): 200, sin duplicar.
-	body = `{"endpoint":"https://push.example/abc","keys":{"auth":"a2","p256dh":"p2"}}`
+	body = `{"endpoint":"https://push.example/abc","keys":{"auth":"a2","p256dh":"p2"},"language":"es"}`
 	res = doJSON(t, "POST", ts.URL, "/api/push/subscribe", cookie, body)
 	if res.StatusCode != 200 {
 		t.Fatalf("subscribe upsert: %d, esperaba 200", res.StatusCode)
@@ -87,6 +93,9 @@ func TestPushEndpointsContract(t *testing.T) {
 		`{"endpoint":"","keys":{"auth":"a","p256dh":"p"}}`,
 		`{"endpoint":"https://x/y"}`,
 		`{"endpoint":"https://x/y","keys":{"auth":"","p256dh":"p"}}`,
+		`{"endpoint":"https://x/y","keys":{"auth":"a","p256dh":"p"}}`,               // sin language
+		`{"endpoint":"https://x/y","keys":{"auth":"a","p256dh":"p"},"language":""}`,  // language vacío
+		`{"endpoint":"https://x/y","keys":{"auth":"a","p256dh":"p"},"language":"fr"}`, // idioma no soportado
 	} {
 		res = doJSON(t, "POST", ts.URL, "/api/push/subscribe", cookie, bad)
 		if res.StatusCode != 400 {

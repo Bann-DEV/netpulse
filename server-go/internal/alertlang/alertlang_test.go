@@ -157,3 +157,26 @@ func TestNotifierWrapsNext(t *testing.T) {
 type notifierFunc func(alerts.AlertEvent)
 
 func (f notifierFunc) Notify(ev alerts.AlertEvent) { f(ev) }
+
+// #1334: LocalizeLang fuerza el idioma por suscriptor, independiente del
+// ajuste global: misma composición por catálogo que Localize.
+func TestLocalizeLangPerSubscriber(t *testing.T) {
+	localesFromApp(t)
+	ev := agentDownEv()
+	es := LocalizeLang(ev, "es")
+	if es.Title == ev.Title || !strings.Contains(es.Title, "gateway") {
+		t.Fatalf("esperaba título ES interpolado: %q", es.Title)
+	}
+	if es.Description == ev.Description || !strings.Contains(es.Description, "5m") {
+		t.Fatalf("esperaba descripción ES interpolada: %q", es.Description)
+	}
+	// Idioma no soportado: cae al literal del evento (nunca peor que nativo).
+	if out := LocalizeLang(ev, "fr"); out.Title != ev.Title {
+		t.Fatalf("idioma no soportado debe devolver el evento tal cual: %q", out.Title)
+	}
+	// Sin type: no se toca.
+	bare := alerts.AlertEvent{Title: "Raw", Description: "raw"}
+	if out := LocalizeLang(bare, "es"); out.Title != "Raw" {
+		t.Fatalf("evento sin type no se localiza: %q", out.Title)
+	}
+}

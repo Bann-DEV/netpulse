@@ -4240,7 +4240,7 @@ type PushCardState =
   | 'disabled' // todo listo, falta activar
 
 function PushNotificationsCard({ onSaved }: { onSaved: () => void }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { isDemo } = useNetPulse()
   const [state, setState] = useState<PushCardState>('loading')
   const [busy, setBusy] = useState(false)
@@ -4305,9 +4305,14 @@ function PushNotificationsCard({ onSaved }: { onSaved: () => void }) {
         ),
       ])
       const json = sub.toJSON()
+      // #1334: el idioma efectivo (resuelto) viaja con la suscripción; el
+      // server compone el push en ese idioma. 'auto' nunca se persiste: se
+      // resuelve aquí a es|en (i18n.language ya está resuelto por el detector
+      // / el ajuste del usuario).
       const ok = await postPushSubscribe({
         endpoint: sub.endpoint,
         keys: { auth: json.keys?.auth ?? '', p256dh: json.keys?.p256dh ?? '' },
+        language: i18n.language.startsWith('es') ? 'es' : 'en',
       })
       if (!ok) {
         // El servidor no la guardó: baja local para no dejar estado fantasma
@@ -4322,7 +4327,7 @@ function PushNotificationsCard({ onSaved }: { onSaved: () => void }) {
     } finally {
       setBusy(false)
     }
-  }, [busy, t, onSaved])
+  }, [busy, t, i18n, onSaved])
 
   /** Baja local + POST /api/push/unsubscribe (best-effort: el servidor purga 404/410) */
   const disable = useCallback(async () => {

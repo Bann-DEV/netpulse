@@ -15,6 +15,7 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/gnacho/netpulse/server-go/internal/alertlang"
 	"github.com/gnacho/netpulse/server-go/internal/alerts"
 	"github.com/gnacho/netpulse/server-go/internal/db"
 )
@@ -128,19 +129,28 @@ func payloadJSON(ev alerts.AlertEvent) ([]byte, error) {
 }
 
 // sendAll envía el evento a TODAS las suscripciones y purga las muertas.
+// El payload se serializa POR suscripción (#1334: idioma por suscriptor).
 func (n *Notifier) sendAll(ev alerts.AlertEvent) {
-	body, err := payloadJSON(ev)
-	if err != nil {
-		slog.Error("push: payload no serializable", "alertId", ev.ID, "error", err)
-		return
-	}
 	subs, err := ListSubscriptions(n.db)
 	if err != nil {
 		slog.Error("push: no se pudieron listar suscripciones", "alertId", ev.ID, "error", err)
 		return
 	}
 	for _, s := range subs {
-		n.sendOne(ev, body, s)
+		// #1334: la suscripción recuerda el idioma efectivo de la UI en su
+		// alta; se compone el payload en ESE idioma (catálogo alertlang, el
+		// mismo de la traducción global). Sin idioma (legacy): el payload ya
+		// llega traducido al idioma global por alertlang.Notifier.
+		evs := ev
+		if s.Language != "" {
+			evs = alertlang.LocalizeLang(ev, s.Language)
+		}
+		body, err := payloadJSON(evs)
+		if err != nil {
+			slog.Error("push: payload no serializable", "alertId", ev.ID, "error", err)
+			continue
+		}
+		n.sendOne(evs, body, s)
 	}
 }
 

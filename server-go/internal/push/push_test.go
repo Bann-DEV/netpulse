@@ -16,11 +16,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gnacho/netpulse/server-go/internal/alertlang"
 	"github.com/gnacho/netpulse/server-go/internal/alerts"
 	"github.com/gnacho/netpulse/server-go/internal/db"
 	"github.com/gnacho/netpulse/server-go/internal/push"
@@ -368,4 +371,90 @@ func TestNotifierCloseConNotifyConcurrentesNoPanic(t *testing.T) {
 	n.Close()
 	close(done)
 	wg.Wait()
+}
+
+// #1334: el payload se compone POR suscripción: la que guardó idioma es/en
+// recibe el texto en ese idioma del catálogo, aunque el evento llegue con
+// literales en inglés y el ajuste global sea otro.
+func TestNotifierLocalizesPerSubscription(t *testing.T) {
+	d, _ := openDB(t)
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alertlang.SetLocalesFS(os.DirFS(filepath.Join(root, "app", "dist", "locales")))
+	if len(alertlang.Supported()) == 0 {
+		t.Fatal("sin catálogos (¿falta npm run build en app/?)")
+	}
+
+	uaES := newBrowserSub(t)
+	uaEN := newBrowserSub(t)
+	type got struct {
+		path string
+		body []byte
+	}
+	ch := make(chan got, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		ch <- got{path: r.URL.Path, body: body}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	for _, s := range []struct {
+		path, lang string
+		ua         browserSub
+	}{
+		{"/es", "es", uaES},
+		{"/en", "en", uaEN},
+	} {
+		if _, err := push.UpsertSubscription(d, push.Subscription{
+			Endpoint: srv.URL + s.path, Auth: s.ua.authB, P256dh: s.ua.pubB, Language: s.lang,
+		}); err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	}
+
+	n := newNotifier(t, d)
+	n.Notify(alerts.AlertEvent{
+		ID: "alert-agent-down-gateway", Category: alerts.CatRouter, Urgent: true, Severity: "warn",
+		Type: "agent-down", Title: "CANARY", Description: "CANARY",
+		Vars: map[string]string{"router": "gateway", "confirm": "5m"},
+	})
+
+	byPath := map[string][]byte{}
+	for i := 0; i < 2; i++ {
+		select {
+		case g := <-ch:
+			byPath[g.path] = g.body
+		case <-time.After(15 * time.Second):
+			t.Fatal("push service simulado no recibió las dos suscripciones")
+		}
+	}
+	decode := func(path string, ua browserSub) (title, body string) {
+		t.Helper()
+		raw, ok := byPath[path]
+		if !ok {
+			t.Fatalf("sin push en %s", path)
+		}
+		var p struct {
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		}
+		if err := json.Unmarshal(decryptAES128GCM(t, ua, raw), &p); err != nil {
+			t.Fatalf("payload %s no es JSON: %v", path, err)
+		}
+		return p.Title, p.Body
+	}
+	esTitle, esBody := decode("/es", uaES)
+	if !strings.Contains(esTitle, "Agente caído") || !strings.Contains(esBody, "gateway") {
+		t.Fatalf("suscripción ES sin traducir: title=%q body=%q", esTitle, esBody)
+	}
+	enTitle, enBody := decode("/en", uaEN)
+	if !strings.Contains(enTitle, "Agent down") || !strings.Contains(enBody, "gateway") {
+		t.Fatalf("suscripción EN sin traducir: title=%q body=%q", enTitle, enBody)
+	}
+	if esTitle == "CANARY" || enTitle == "CANARY" {
+		t.Fatal("el canario no debe llegar sin localizar")
+	}
 }
