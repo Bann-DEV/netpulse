@@ -1,6 +1,7 @@
 // alerts_test.go — tests del motor (SPEC-ALERTAS §2-4): defaults, validación,
-// filtrado none/urgent/all en creación, dedup 5 min, cap 100, read-state
-// (FIFO 200, persistencia kv) y hook Notifier.
+// política de notificación none/urgent/all (#1413: la ingesta ya no se
+// filtra), dedup 5 min, cap 100, read-state (FIFO 200, persistencia kv) y
+// hook Notifier.
 package alerts
 
 import (
@@ -63,39 +64,55 @@ func TestSetConfigPartialAndValidation(t *testing.T) {
 	}
 }
 
+// TestEmitFiltering cubre la semántica #1413: la config de categoría NO filtra
+// la ingesta (todo se guarda en el log y el feed); solo gobierna el Notifier
+// (none = nunca, urgent = solo Urgent, all = siempre).
 func TestEmitFiltering(t *testing.T) {
 	e := New(nil, nil)
-	// none → descarta (signal por defecto)
-	if e.Emit(ev("s1", CatSignal, true)) {
-		t.Fatal("signal:none debía descartar")
+	spy := &spyNotifier{}
+	e.SetNotifier(spy)
+	// none → se guarda pero NO notifica (signal por defecto)
+	if !e.Emit(ev("s1", CatSignal, true)) {
+		t.Fatal("signal:none debía guardar (la ingesta ya no se filtra)")
 	}
-	// urgent → solo urgentes (router por defecto)
-	if e.Emit(ev("r1", CatRouter, false)) {
-		t.Fatal("router:urgent debía descartar no-urgente")
+	if len(spy.got) != 0 {
+		t.Fatalf("signal:none no debía notificar, notificó %d", len(spy.got))
+	}
+	// urgent → se guarda el no-urgente pero solo notifica el urgente (router)
+	if !e.Emit(ev("r1", CatRouter, false)) {
+		t.Fatal("router:urgent debía guardar el no-urgente")
+	}
+	if len(spy.got) != 0 {
+		t.Fatalf("router:urgent no debía notificar el no-urgente, notificó %d", len(spy.got))
 	}
 	if !e.Emit(ev("r2", CatRouter, true)) {
-		t.Fatal("router:urgent debía aceptar urgente")
+		t.Fatal("router:urgent debía guardar el urgente")
 	}
-	// all → pasa todo (clients=all desde #196)
-	if !e.Emit(ev("c1", CatClients, false)) {
-		t.Fatal("clients:all debía aceptar no-urgente")
+	if len(spy.got) != 1 || spy.got[0].ID != "r2" {
+		t.Fatalf("router:urgent debía notificar solo el urgente: %+v", spy.got)
 	}
-	if !e.Emit(ev("c2", CatClients, true)) {
-		t.Fatal("clients:all debía aceptar urgente")
+	// all → guarda y notifica todo (clients=all desde #196, system por defecto)
+	if !e.Emit(ev("c1", CatClients, false)) || !e.Emit(ev("c2", CatClients, true)) {
+		t.Fatal("clients:all debía guardar todo")
 	}
-	// all → pasa todo (system por defecto)
 	if !e.Emit(ev("y1", CatSystem, false)) {
 		t.Fatal("system:all debía aceptar no-urgente")
 	}
-	if got := len(e.List()); got != 4 {
-		t.Fatalf("lista: %d, esperaba 4", got)
+	if len(spy.got) != 4 {
+		t.Fatalf("notificados: %d, esperaba 4 (todo salvo signal:none y el no-urgente de router)", len(spy.got))
 	}
-	// Cambio de nivel reconfigura el filtrado
+	if got := len(e.List()); got != 6 {
+		t.Fatalf("lista: %d, esperaba 6 (nada se descarta)", got)
+	}
+	// Cambio de nivel reconfigura SOLO la notificación
 	if err := e.SetConfig(map[string]string{"signal": "all"}); err != nil {
 		t.Fatal(err)
 	}
 	if !e.Emit(ev("s2", CatSignal, false)) {
-		t.Fatal("signal:all debía aceptar")
+		t.Fatal("signal:all debía guardar")
+	}
+	if len(spy.got) != 5 {
+		t.Fatalf("signal:all debía notificar: %d notificados", len(spy.got))
 	}
 }
 

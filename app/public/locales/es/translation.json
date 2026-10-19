@@ -57,7 +57,7 @@
     "resolvesTitle_other": "Resuelve {{count}} eventos",
     "configButton": "Configurar alertas",
     "configTitle": "Configuración de alertas",
-    "configDescription": "Elige qué eventos entran en tu historial y cuentan en la campana, por categoría.",
+    "configDescription": "Todos los eventos quedan en tu historial y cuentan en la campana. Elige qué te notifica, por categoría.",
     "configSaved": "Guardado",
     "configSaveError": "No se pudo guardar — inténtalo de nuevo",
     "categories": {

@@ -57,7 +57,7 @@
     "resolvesTitle_other": "Resolves {{count}} events",
     "configButton": "Configure alerts",
     "configTitle": "Alert settings",
-    "configDescription": "Choose which events are kept in your history and counted on the bell, per category.",
+    "configDescription": "Every event is kept in your history and counted on the bell. Choose what notifies you, per category.",
     "configSaved": "Saved",
     "configSaveError": "Could not save — please try again",
     "categories": {

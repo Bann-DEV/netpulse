@@ -275,7 +275,7 @@ El mapa se construye con el bridge FDB (para clientes por cable), LLDP cuando es
 ### Qué muestra
 
 - **Resumen**: tres contadores (avisos sin leer, alertas de hoy, críticos) con un desglose por causa.
-- **Configuración de alertas**: por categoría, el nivel deseado (Solo urgentes / Todo / Nada) y un gestor de reglas personalizadas.
+- **Configuración de alertas**: por categoría, el nivel de notificación (Solo urgentes / Todo / Nada) y un gestor de reglas personalizadas. Todos los eventos se guardan siempre en el registro, con cualquier nivel; el nivel solo controla qué te notifica.
 - **Filtros**: por severidad, por tipo, por categoría y "Solo no leídas".
 - **Feed en línea de tiempo** agrupado por día, con severidad por color y contexto expandible (minigráfica con umbral, datos del peer WireGuard o del dispositivo afectado).
 
@@ -292,14 +292,14 @@ Las alertas las genera el servidor a partir de lo que ya monitoriza: temperatura
 
 ### Decisiones de diseño
 
-- La configuración es **por categoría y por nivel**, no alerta a alerta: puedes silenciar toda la categoría "Clientes" sin tocar el resto.
+- La configuración es **por categoría y por nivel**, no alerta a alerta: el nivel es una política de notificación (Nada / Solo urgentes / Todo). Los eventos por debajo del nivel siguen registrándose en el log y el feed; para ocultarlos visualmente usa los filtros de categoría del feed.
 - Puedes **silenciar** una alerta concreta 1 hora, 24 horas o para siempre.
 - El **feed usa scroll infinito simulado**: al llegar abajo se muestra el fin del historial.
 
 ### Procedimiento: configurar qué alertas quieres
 
 1. Abre **Alertas** y pulsa **Configuración**.
-2. Para cada categoría (Router, Internet, Clientes, Señal, VPN, Sistema) elige el nivel: **Solo urgentes**, **Todo** o **Nada**.
+2. Para cada categoría (Router, Internet, Clientes, Señal, VPN, Sistema) elige el nivel de notificación: **Solo urgentes**, **Todo** o **Nada**. Con cualquier nivel todos los eventos quedan en el registro y cuentan en la campana; el nivel solo decide cuál envía notificación.
 3. Si necesitas reglas propias (umbrales a medida), usa el gestor de **reglas** al final del panel.
 4. Los cambios se guardan al instante (verás la confirmación).
 

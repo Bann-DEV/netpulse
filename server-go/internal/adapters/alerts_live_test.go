@@ -83,24 +83,29 @@ func liveTestLive() *Live {
 
 func TestLiveRouterRecoveredTaxonomy(t *testing.T) {
 	l := liveTestLive()
-	// Con el default router:urgent el evento (urgent=false) se filtra EN
-	// CREACIÓN (semántica SPEC §2): es lo esperado.
+	// Semántica #1413: la config ya no filtra la ingesta, así que con el
+	// default router:urgent el evento (urgent=false) SE GUARDA igual.
 	l.mu.Lock()
 	l.emitRouterRecovered("patio", "Patio")
 	l.mu.Unlock()
-	if len(l.engine.List()) != 0 {
-		t.Fatal("con router:urgent, 'recuperado' (no urgente) debía filtrarse")
+	list := l.engine.List()
+	if len(list) != 1 {
+		t.Fatalf("alertas: %d, esperaba 1 (la ingesta ya no se filtra)", len(list))
 	}
-	// Con router:all pasa, con la taxonomía exacta del SPEC §1.
+	if a := list[0]; a.Category != alerts.CatRouter || a.Urgent || a.Severity != "ok" {
+		t.Fatalf("recuperado: (%s,%v,%s), esperaba (router,false,ok)", a.Category, a.Urgent, a.Severity)
+	}
+	// Con router:all la taxonomía es la misma (no cambia la ingesta, solo la
+	// notificación; el SPEC §1 se cumple en ambos niveles).
 	if err := l.engine.SetConfig(map[string]string{"router": "all"}); err != nil {
 		t.Fatal(err)
 	}
 	l.mu.Lock()
 	l.emitRouterRecovered("patio", "Patio")
 	l.mu.Unlock()
-	list := l.engine.List()
+	list = l.engine.List()
 	if len(list) != 1 {
-		t.Fatalf("alertas: %d", len(list))
+		t.Fatalf("alertas tras re-emitir: %d, esperaba 1 (mismo ID, update)", len(list))
 	}
 	a := list[0]
 	if a.Category != alerts.CatRouter || a.Urgent || a.Severity != "ok" {

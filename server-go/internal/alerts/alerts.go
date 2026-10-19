@@ -180,9 +180,11 @@ var Hints = map[string]string{
 func HintFor(slug string) string { return Hints[slug] }
 
 // Notifier es el hook de notificación externa (push/webhook/telegram/ntfy).
-// El engine dispara TODOS los eventos que pasan config (salvo suprimidos);
-// la decisión de urgencia es por canal (#874).
-// Se llama SOLO para eventos que pasan config Y son Urgent=true.
+// El engine lo dispara solo para eventos cuya categoría permite notificación
+// según el nivel configurado (#1413): none nunca, urgent solo Urgent, all
+// siempre. La decisión de urgencia fina por canal sigue en cada integración
+// (#874, urgencyGate). Los eventos suprimidos topológicamente se guardan con
+// SuppressedBy y nunca notifican.
 type Notifier interface {
 	Notify(ev AlertEvent)
 }
@@ -460,16 +462,19 @@ func (e *Engine) SetConfig(patch map[string]string) error {
 	return nil
 }
 
-// pasaLocked: ¿el evento supera la config de su categoría? (none descarta;
-// urgent solo deja urgentes; all deja todo). Requiere e.mu ya tomado.
-func (e *Engine) pasaLocked(ev AlertEvent) bool {
+// notificaLocked: ¿la config de la categoría permite NOTIFICAR este evento?
+// (issue #1413: los niveles son política de notificación, no de ingesta:
+// todo se guarda en el log y el feed; el nivel solo gobierna el Notifier).
+// none = nunca; urgent = solo eventos Urgent; all = siempre. Categoría
+// desconocida: notifica (la validación estricta es de SetConfig).
+// Requiere e.mu ya tomado.
+func (e *Engine) notificaLocked(ev AlertEvent) bool {
 	level, known := e.cfg[ev.Category]
 	if known {
 		if level == LevelNone || (level == LevelUrgent && !ev.Urgent) {
 			return false
 		}
 	}
-	// Categoría desconocida: pasa (la validación estricta es de SetConfig).
 	return true
 }
 
@@ -543,19 +548,15 @@ func (e *Engine) persistLocked(ev AlertEvent) {
 		   (SELECT id FROM alert_log ORDER BY ts DESC LIMIT ?)`, PersistMaxEvents)
 }
 
-// Emit aplica la semántica none/urgent/all EN CREACIÓN, el dedup de 5 min y
-// el cap de 100; devuelve true si el evento pasó (se guardó). Los eventos
-// que pasan disparan el Notifier (hook de Bloque C) con SU suppressión; el
-// filtro por URGENCIA vive en cada canal (#874): cada transporte decide si
-// lleva solo urgentes (default) o todo.
+// Emit aplica el dedup de 5 min y el cap de 100; devuelve true si el evento
+// se guardó. TODO evento se guarda (issue #1413): el nivel none/urgent/all de
+// su categoría ya no filtra la ingesta, solo gobierna si dispara el Notifier.
+// El filtro por URGENCIA fino vive en cada canal (#874): cada transporte
+// decide si lleva solo urgentes (default) o todo.
 // Supresión topológica (#332): si el router tiene un padre offline en el
 // grafo, la alerta se guarda con SuppressedBy y NO dispara el Notifier.
 func (e *Engine) Emit(ev AlertEvent) bool {
 	e.mu.Lock()
-	if !e.pasaLocked(ev) {
-		e.mu.Unlock()
-		return false
-	}
 	if e.suppression != nil && ev.RouterID != "" {
 		if parent := e.suppression.SuppressedBy(ev.RouterID); parent != "" {
 			ev.SuppressedBy = parent
@@ -574,15 +575,17 @@ func (e *Engine) Emit(ev AlertEvent) bool {
 	now := e.now()
 	ok := e.insertaLocked(ev, now, false)
 	n := e.notifier
+	notify := n != nil && ev.SuppressedBy == "" && e.notificaLocked(ev)
 	e.mu.Unlock()
-	if ok && n != nil && ev.SuppressedBy == "" {
+	if ok && notify {
 		n.Notify(ev)
 	}
 	return ok
 }
 
-// EmitNoDedup es Emit sin la ventana de dedup de 5 min (silencio, config y
-// cap SÍ aplican, y la supresión topológica marca SuppressedBy igual). Uso:
+// EmitNoDedup es Emit sin la ventana de dedup de 5 min (silencio, cap,
+// supresión y política de notificación por categoría SÍ aplican; issue #1413:
+// la config ya no filtra la ingesta, solo la notificación). Uso:
 // alertas cuya condición se trackea por estado fuera del engine (issue #846,
 // offline de router): al ABRIR incidente la alerta debe entrar siempre,
 // porque el cierre del incidente anterior ya retiró la suya del feed y el
@@ -590,10 +593,6 @@ func (e *Engine) Emit(ev AlertEvent) bool {
 // de incidente (offlineOpen), no la ventana.
 func (e *Engine) EmitNoDedup(ev AlertEvent) bool {
 	e.mu.Lock()
-	if !e.pasaLocked(ev) {
-		e.mu.Unlock()
-		return false
-	}
 	if e.suppression != nil && ev.RouterID != "" {
 		if parent := e.suppression.SuppressedBy(ev.RouterID); parent != "" {
 			ev.SuppressedBy = parent
@@ -609,8 +608,9 @@ func (e *Engine) EmitNoDedup(ev AlertEvent) bool {
 	now := e.now()
 	ok := e.insertaLocked(ev, now, true)
 	n := e.notifier
+	notify := n != nil && ev.SuppressedBy == "" && e.notificaLocked(ev)
 	e.mu.Unlock()
-	if ok && n != nil && ev.SuppressedBy == "" {
+	if ok && notify {
 		n.Notify(ev)
 	}
 	return ok
@@ -622,13 +622,10 @@ func (e *Engine) EmitNoDedup(ev AlertEvent) bool {
 // Diseñado para alertas "en curso" que se actualizan (p.ej. auto-rearme sin
 // recuperación: un incidente = una sola alerta, issue #271). El update NO
 // pasa por el dedup (consolida, no duplica); la inserción de un ID nuevo sí.
-// Devuelve true si el evento pasó la config (insertado o actualizado).
+// Devuelve true si se insertó o actualizó. La notificación obedece la
+// política de nivel de la categoría (#1413).
 func (e *Engine) EmitOrUpdate(ev AlertEvent) bool {
 	e.mu.Lock()
-	if !e.pasaLocked(ev) {
-		e.mu.Unlock()
-		return false
-	}
 	// #1074: mismo default de Ts/Time que en Emit (#914) ANTES de insertar y
 	// notificar. La rama de inserción pasaba la `ev` original a Notify: si el
 	// emisor no fijaba Ts (p. ej. agent-outdated), el notifier recibía Ts=0
@@ -675,8 +672,9 @@ func (e *Engine) EmitOrUpdate(ev AlertEvent) bool {
 			e.list = append([]AlertEvent{ev}, e.list...)
 			e.persistLocked(ev)
 			n := e.notifier
+			notify := n != nil && e.notificaLocked(ev)
 			e.mu.Unlock()
-			if n != nil {
+			if notify {
 				n.Notify(ev)
 			}
 			return true
@@ -684,8 +682,9 @@ func (e *Engine) EmitOrUpdate(ev AlertEvent) bool {
 	}
 	ok := e.insertaLocked(ev, now, false)
 	n := e.notifier
+	notify := n != nil && e.notificaLocked(ev)
 	e.mu.Unlock()
-	if ok && n != nil {
+	if ok && notify {
 		n.Notify(ev)
 	}
 	return ok
@@ -695,17 +694,14 @@ func (e *Engine) EmitOrUpdate(ev AlertEvent) bool {
 // persiste en alert_log y, si ya existe una alerta con el mismo ID, se
 // actualiza en sitio y se mueve al frente (semántica "viva por router": un
 // incidente abierto = una alerta con ID estable). Si quedara una copia
-// persistida antigua con ese ID, se borra. Config, silencio y supresión
-// topológica aplican igual que en Emit; el dedup de 5 min NO aplica (el
-// tracking del incidente vive en el emisor, patrón #846). Devuelve true si
-// el evento pasó la config.
+// persistida antigua con ese ID, se borra. Silencio y supresión
+// topológica aplican como en Emit; la notificación obedece el nivel de la
+// categoría (#1413). El dedup de 5 min NO aplica (el tracking del incidente
+// vive en el emisor, patrón #846). Devuelve true siempre (la volátil nunca
+// se descarta por config).
 func (e *Engine) EmitVolatile(ev AlertEvent) bool {
 	ev.Volatile = true
 	e.mu.Lock()
-	if !e.pasaLocked(ev) {
-		e.mu.Unlock()
-		return false
-	}
 	if e.suppression != nil && ev.RouterID != "" {
 		if parent := e.suppression.SuppressedBy(ev.RouterID); parent != "" {
 			ev.SuppressedBy = parent
@@ -747,17 +743,16 @@ func (e *Engine) EmitVolatile(ev AlertEvent) bool {
 		_, _ = e.db.Exec("DELETE FROM alert_log WHERE id = ?", ev.ID)
 	}
 	n := e.notifier
+	notify := n != nil && ev.SuppressedBy == "" && e.notificaLocked(ev)
 	e.mu.Unlock()
-	if n != nil && ev.SuppressedBy == "" {
+	if notify {
 		n.Notify(ev)
 	}
 	return true
 }
 
-// Seed inserta un evento histórico (arranque del modo demo) SIN aplicar el
-// filtro de config — el SPEC §5 exige que las 5 canon sobrevivan con los
-// defaults aunque "vpn:none"/"clients:urgent" descartarían 2 en creación —.
-// Mantiene dedup, cap y Read=false; NO dispara el Notifier (son historia).
+// Seed inserta un evento histórico (arranque del modo demo) SIN disparar el
+// Notifier (son historia). Mantiene dedup, cap y Read=false.
 // Devuelve true si se guardó.
 func (e *Engine) Seed(ev AlertEvent) bool {
 	e.mu.Lock()
