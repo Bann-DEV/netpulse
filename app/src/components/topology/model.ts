@@ -493,14 +493,28 @@ function ringLayoutCount<T extends { x: number; y: number; size?: number }>(
   const free = freeArcs(excludes)
   const totalFree = free.reduce((a, [s, e]) => a + (e - s), 0)
   if (totalFree <= 0) return 0
+  // #1416: unidad pegada a un borde lateral del lienzo → rellenar primero
+  // los arcos que apuntan hacia DENTRO (el lado con más sitio). Los chips de
+  // los arcos exteriores caen fuera del viewport y ensuciaban el centro del
+  // diagrama. El hint es el ángulo cardinal de ese lado; los arcos se
+  // reordenan por distancia angular de su punto medio al hint (los de su
+  // lado primero; orden estable en el resto). Unidades centradas: sin
+  // cambio (sideHint null conserva el orden documental 0°→360°).
+  const sideHint = node.x < VB_W / 3 ? 0 : node.x > (2 * VB_W) / 3 ? 180 : null
+  const arcMid = ([s, e]: [number, number]) => norm(s + (e - s) / 2)
+  const angDist = (a: number, b: number) => {
+    const d = norm(a - b)
+    return Math.min(d, 360 - d)
+  }
+  const fillArcs = sideHint === null ? free : [...free].sort((x, y) => angDist(arcMid(x), sideHint) - angDist(arcMid(y), sideHint))
   let idx = 0
   for (const ring of rings) {
     if (idx >= items.length) break
     const chipSize = items[idx]?.size ?? 24
     const minArcDeg = ((chipSize + CHIP_GAP) * 180) / (Math.PI * ring.r)
     let ringPlaced = 0
-    for (let ai = 0; ai < free.length && ringPlaced < ring.cap && idx < items.length; ai++) {
-      const [s, e] = free[ai]!
+    for (let ai = 0; ai < fillArcs.length && ringPlaced < ring.cap && idx < items.length; ai++) {
+      const [s, e] = fillArcs[ai]!
       const arcLen = e - s
       const maxFit = Math.max(1, Math.floor(arcLen / minArcDeg))
       const remaining = items.length - idx
