@@ -393,15 +393,24 @@ El plan se calcula con los **scans de vecinos** de cada radio. Aquí hay una dif
 
 ## Actualizaciones de firmware
 
-**Ruta:** `/firmware-upgrades`. Título en la interfaz: **Actualizaciones de firmware**. Marca "labs" y solo administradores.
+**Ruta:** `/firmware-upgrades`. Título en la interfaz: **Actualizaciones de firmware**. Solo administradores.
 
 ### Qué muestra
 
-Una tarjeta por router con los campos del objetivo de actualización (versión actual, versión objetivo, modelo/target, URL de la imagen, checksum SHA256), el estado del último intento y las acciones de actualizar ahora o programar.
+Una tarjeta por router con los campos del objetivo de actualización (versión actual, versión objetivo, modelo/target, URL de la imagen, checksum SHA256), el estado del último intento y las acciones de actualizar ahora o programar. En la parte superior:
+
+- **Refrescar**: vuelve a leer la lista de actualizaciones y sus estados desde el servidor. No sonda los routers por sí mismo; mientras hay una actualización en curso, la página se auto-refresca sola.
+- **Detectar imagen** (en la sección de URL): resuelve la URL de descarga de la imagen oficial de OpenWrt a partir del "Sistema detectado" que reporta el agente (placa, target, versión) para la versión objetivo que hayas escrito. Rellena modelo/target y URL; el checksum sigue teniendo que pegarlo tú.
+- **Comprobar** (el botón de terminal, por unidad): ejecuta `owut check` en ese router y muestra si el servidor ASU puede construir la imagen de actualización. Necesita owut instalado en la unidad (la página ofrece instalarlo si falta).
+
+El desplegable de **versión objetivo** se rellena con las versiones que reporta el propio owut de la unidad; sin owut, el campo es texto libre y nada lo rellena automáticamente.
 
 ### Qué datos necesita
 
-Es un flujo administrado: hay que indicar la URL de la imagen OpenWrt, el modelo/target y, recomendablemente, el checksum SHA256. El agente detecta el sistema del router (modelo, placa, versión, target) y lo muestra como "Sistema detectado" para ayudarte a rellenar los campos.
+Dos motores, elegidos por actualización:
+
+- **URL + checksum**: indicas la URL de la imagen OpenWrt, el modelo/target y, recomendablemente, el checksum SHA256. El agente detecta el sistema del router (modelo, placa, versión, target) y lo muestra como "Sistema detectado" para ayudarte a rellenar los campos.
+- **owut (ASU)**: la unidad ejecuta owut contra el servidor attended-sysupgrade de OpenWrt. Usa **Comprobar** para revisar qué se construiría, **Instalar owut** si la unidad no lo tiene, y **Actualizar ahora** para construir, descargar y flashear la imagen con tus paquetes instalados.
 
 ### Cómo leerlo
 
@@ -412,7 +421,7 @@ Es un flujo administrado: hay que indicar la URL de la imagen OpenWrt, el modelo
 ### Decisiones de diseño
 
 - **Verificación antes de flashear**: si hay checksum y no coincide, la actualización se detiene y el router no se toca. Sin checksum, flashea sin verificar (se te avisa).
-- **Respaldo automático** de la configuración antes de flashear.
+- **Respaldo automático** de la configuración antes de flashear (`sysupgrade -b`). La copia se escribe en el `/tmp` del propio router y su ruta se reporta con el resultado; descárgatela antes de un reinicio si quieres conservarla, porque `/tmp` no sobrevive a uno. El servidor no la copia.
 - Se puede **programar** una actualización desatendida a una hora local concreta (y cancelarla antes de que arranque).
 - El objetivo que se flashea es el **guardado**, no el que tienes a medio editar (el modal resume exactamente lo que se va a flashear).
 
