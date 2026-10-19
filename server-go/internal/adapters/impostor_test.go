@@ -124,6 +124,34 @@ func TestImpostorForeignSsidIgnored(t *testing.T) {
 	}
 }
 
+// #1402: la unidad cuyo payload no trae ownBssids (y no se sondea por SSH)
+// se reconoce por routers.mac: su bridge MAC y sus radios derivadas (+1/+2)
+// no deben alertar como impostor. Un BSSID realmente ajeno SÍ sigue alertando.
+func TestImpostorFleetMacSeeded(t *testing.T) {
+	l, _ := newImpostorLive(t)
+	// Unidad de flota sin agente: solo su MAC conocida en routers.mac.
+	if _, err := l.db.Exec(
+		`INSERT INTO routers (id, name, host, type, created_at, mac) VALUES ('ap2', 'AP Dos', '192.168.8.3', 'openwrt', 1, 'aa:bb:cc:00:10:00')`,
+	); err != nil {
+		t.Fatalf("insert router: %v", err)
+	}
+	now := time.Now()
+	// Radio = mac+1 anunciando el SSID de la flota: propia, no impostor.
+	insertScan(t, l, "ap1", "AA:BB:CC:00:10:01", "temiscira", now.Add(-40*time.Minute))
+	insertScan(t, l, "ap1", "AA:BB:CC:00:10:01", "temiscira", now)
+	l.EvalSsidImpostors()
+	if got := impostorAlerts(l); len(got) != 0 {
+		t.Fatalf("radio derivada de routers.mac no es impostor; alertas: %+v", got)
+	}
+	// BSSID realmente ajeno: la regla sigue viva.
+	insertScan(t, l, "ap1", "DE:AD:BE:EF:00:09", "temiscira", now.Add(-40*time.Minute))
+	insertScan(t, l, "ap1", "DE:AD:BE:EF:00:09", "temiscira", now)
+	l.EvalSsidImpostors()
+	if got := impostorAlerts(l); len(got) != 1 {
+		t.Fatalf("BSSID ajeno debía alertar; alertas: %+v", got)
+	}
+}
+
 func TestImpostorSamePayloadFrozenDoesNotConfirm(t *testing.T) {
 	l, _ := newImpostorLive(t)
 	now := time.Now()

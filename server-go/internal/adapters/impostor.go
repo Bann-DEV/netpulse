@@ -49,6 +49,27 @@ const (
 	impostorEnabledKey = "alerts.impostor_enabled"
 )
 
+// macDerivatives (#1402): la MAC base de una unidad de flota y sus +1/+2
+// (las radios OpenWrt enumeran a partir de la MAC del bridge). Devuelve las
+// MAC normalizadas en mayúsculas; nil si la base no parsea.
+func macDerivatives(mac string) []string {
+	hw, err := net.ParseMAC(strings.TrimSpace(mac))
+	if err != nil || len(hw) != 6 {
+		return nil
+	}
+	var v uint64
+	for _, b := range hw {
+		v = v<<8 | uint64(b)
+	}
+	out := make([]string, 0, 3)
+	for n := uint64(0); n <= 2; n++ {
+		x := v + n
+		out = append(out, fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X",
+			byte(x>>40), byte(x>>32), byte(x>>24), byte(x>>16), byte(x>>8), byte(x)))
+	}
+	return out
+}
+
 // EvalSsidImpostors: una pasada sobre wifi_scans recientes. La llama el
 // handler de ingesta del agente tras guardar un scan nuevo (momento exacto
 // en que la evidencia cambia). Barata: una query acotada por ventana.
@@ -67,6 +88,23 @@ func (l *Live) EvalSsidImpostors() {
 	ownBssids := map[string]bool{}
 	for _, b := range l.agents.LocalBssids() {
 		ownBssids[b] = true
+	}
+	// #1402: las MAC de la flota (routers.mac, aprendida en cada sondeo)
+	// también son propias, con sus radios derivadas (+1/+2, patrón OpenWrt).
+	// Cubre la unidad cuyo payload no trae ownBssids y que no se sondea por
+	// SSH: sin esta fuente sus propias balizas caerían en la regla como
+	// rogue APs. Consulta directa a BD: routers.mac es la fuente de verdad.
+	if rows, err := l.db.Query(`SELECT mac FROM routers WHERE mac IS NOT NULL AND mac != ''`); err == nil {
+		for rows.Next() {
+			var m string
+			if rows.Scan(&m) != nil {
+				continue
+			}
+			for _, b := range macDerivatives(m) {
+				ownBssids[b] = true
+			}
+		}
+		rows.Close()
 	}
 	// Las radios sondeadas por SSH (iwinfo) también son propias: sin esto un
 	// router sin agente anunciando el SSID de la flota sería falso positivo.
