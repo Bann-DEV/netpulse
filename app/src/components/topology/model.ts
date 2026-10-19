@@ -746,10 +746,18 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
         return { x: Math.round(gatewayNode.x + r * Math.cos(rad(a))), y: Math.round(gatewayNode.y + r * Math.sin(rad(a))), angle: a }
       })()
     : { x: 190, y: 120, angle: 180 }
-  const switchNodes: RouterNode[] = switches.slice(0, 3).map((router, i) => {
-    const off = i * 55
-    const x = Math.round(switchAnchor.x - off * Math.cos(rad(switchAnchor.angle)))
-    const y = Math.round(switchAnchor.y - off * Math.sin(rad(switchAnchor.angle)))
+  // #1422: sin límite artificial de 3. Todos los switches se colocan EN LA
+  // LÍNEA PERPENDICULAR al rayo del anchor (la dirección tangente del hueco),
+  // centrados en él y escalonados ligeramente en la dirección del rayo para
+  // que los cables de uplink no se monten. La fila crece a lo largo del hueco
+  // y el clamp la mantiene dentro del lienzo.
+  const switchNodes: RouterNode[] = switches.map((router, i) => {
+    const n = Math.max(1, switches.length)
+    const perp = switchAnchor.angle + 90
+    const off = (i - (n - 1) / 2) * 72
+    const stagger = (i % 2) * 26
+    const x = clamp(Math.round(switchAnchor.x + off * Math.cos(rad(perp)) + stagger * Math.cos(rad(switchAnchor.angle))), 70, VB_W - 70)
+    const y = clamp(Math.round(switchAnchor.y + off * Math.sin(rad(perp)) + stagger * Math.sin(rad(switchAnchor.angle))), 70, VB_H - 70)
     const isLeft = x < (gatewayNode?.x ?? 500)
     return {
       kind: 'router' as const,
