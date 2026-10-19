@@ -393,15 +393,24 @@ The plan is computed from each radio's **neighbor scans**. There is a key differ
 
 ## Firmware upgrades
 
-**Route:** `/firmware-upgrades`. UI title: **Firmware upgrades**. Marked "labs" and admin only.
+**Route:** `/firmware-upgrades`. UI title: **Firmware upgrades**. Admin only.
 
 ### What it shows
 
-One card per router with the upgrade target fields (current version, target version, model/target, image URL, SHA256 checksum), the status of the last attempt and the actions to upgrade now or schedule.
+One card per router with the upgrade target fields (current version, target version, model/target, image URL, SHA256 checksum), the status of the last attempt and the actions to upgrade now or schedule. On top:
+
+- **Refresh**: re-reads the list of upgrades and their status from the server. It does not probe the routers by itself; while an upgrade is running the page auto-refreshes on its own.
+- **Detect image** (in the URL section): resolves the download URL of the official OpenWrt image from the "Detected system" the agent reports (board, target, version) for the target version you wrote. It fills model/target and URL for you; the checksum still has to be pasted.
+- **Check** (the terminal button, per unit): runs `owut check` on that router and shows whether the ASU server can build an upgrade image. It needs owut installed on the unit (the page offers the install when missing).
+
+The **target version** dropdown is populated from the versions the unit's own owut reports; without owut, the field is free text and nothing auto-fills it.
 
 ### What data it needs
 
-It is a managed flow: you must provide the OpenWrt image URL, the model/target and, recommended, the SHA256 checksum. The agent detects the router's system (model, board, version, target) and shows it as "Detected system" to help you fill the fields.
+Two engines, chosen per upgrade:
+
+- **URL + checksum**: you provide the OpenWrt image URL, the model/target and, recommended, the SHA256 checksum. The agent detects the router's system (model, board, version, target) and shows it as "Detected system" to help you fill the fields.
+- **owut (ASU)**: the unit runs owut against the OpenWrt attended-sysupgrade server. Use **Check** to review what would be built, **Install owut** if the unit does not have it, and **Upgrade now** to build, download and flash the image with your installed packages.
 
 ### How to read it
 
@@ -412,7 +421,7 @@ It is a managed flow: you must provide the OpenWrt image URL, the model/target a
 ### Design decisions
 
 - **Verify before flashing**: if there is a checksum and it does not match, the upgrade stops and the router is left untouched. Without a checksum, it flashes without verifying (you are warned).
-- **Automatic backup** of the config before flashing.
+- **Automatic backup** of the config before flashing (`sysupgrade -b`). The backup is written to the router's own `/tmp` and its path is reported with the result; grab it before a reboot if you want to keep it, because `/tmp` does not survive one. The server does not copy it.
 - You can **schedule** an unattended upgrade at a specific local time (and cancel it before it starts).
 - The target that gets flashed is the **saved** one, not the one you are mid-editing (the modal summarizes exactly what will be flashed).
 
