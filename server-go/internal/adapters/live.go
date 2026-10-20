@@ -285,6 +285,12 @@ type Live struct {
 	// cambia la versión o el target, y se resuelve al coincidir). Protegido
 	// por mu.
 	fwAlert map[string]fwAlertState
+	// #1444: lista cacheada de releases publicados de OpenWrt (la publica el
+	// ReleasesRefresher tras cada chequeo periódico) y episodios abiertos del
+	// aviso "target no disponible upstream" (routerID → target alertado).
+	fwReleases       []string
+	fwReleasesTs     int64
+	fwUnknownTarget  map[string]string
 
 	// snmpFdbCount (#928): último conteo de entradas FDB por router SNMP,
 	// para loguear solo cuando el resultado cambia.
@@ -471,6 +477,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		lastGood:             map[string]*Router{},
 		lastStatus:           map[string]string{},
 		fwAlert:              map[string]fwAlertState{},
+		fwUnknownTarget:      map[string]string{},
 		boardCache:           map[string]*BoardInfo{},
 		layoutCache:          map[string][]PortLayout{},
 		extrasCache:          map[string]*extrasSnapshot{},
@@ -1344,6 +1351,68 @@ func (l *Live) evalFirmwareAlert(routerID, name, installed, target string, cmp i
 	l.engine.EmitOrUpdate(ev)
 }
 
+// SetFirmwareReleases (#1444) publica la lista cacheada de releases
+// publicados (la alimenta el ReleasesRefresher tras cada chequeo periódico).
+func (l *Live) SetFirmwareReleases(v []string, ts int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fwReleases = append([]string(nil), v...)
+	l.fwReleasesTs = ts
+}
+
+// firmwareTargetKnown (#1444): ¿figura el target entre los releases
+// publicados? Con la lista vacía (chequeo aún sin éxito) NO se gatea: se
+// conserva el comportamiento previo en flotas sin salida a
+// downloads.openwrt.org.
+func (l *Live) firmwareTargetKnown(target string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.fwReleases) == 0 {
+		return true
+	}
+	for _, v := range l.fwReleases {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+// evalFirmwareUnknownTarget (#1444): episodio del aviso "el target no existe
+// upstream" (configuración, no firmware desactualizado). target == "" resuelve
+// el episodio (target corregido, retirado o vuelto conocido).
+func (l *Live) evalFirmwareUnknownTarget(routerID, name, target string) {
+	id := "alert-fw-target-unknown-" + routerID
+	l.mu.Lock()
+	if l.fwUnknownTarget == nil {
+		l.fwUnknownTarget = map[string]string{}
+	}
+	if target == "" {
+		_, active := l.fwUnknownTarget[routerID]
+		delete(l.fwUnknownTarget, routerID)
+		l.mu.Unlock()
+		if active {
+			l.engine.Resolve(id)
+		}
+		return
+	}
+	if prev, active := l.fwUnknownTarget[routerID]; active && prev == target {
+		l.mu.Unlock()
+		return
+	}
+	l.fwUnknownTarget[routerID] = target
+	l.mu.Unlock()
+	l.engine.EmitOrUpdate(AlertEvent{
+		ID:       id, Category: alerts.CatSystem, Urgent: false,
+		Severity: "warn", RouterID: routerID,
+		Title:       "Firmware target not available",
+		Description: fmt.Sprintf("%s: configured target %q is not among the published OpenWrt releases", name, target),
+		Type:        alerts.HintFirmwareUnknownTarget,
+		Vars:        map[string]string{"router": name, "target": target},
+		Time:        "just now",
+	})
+}
+
 // buildRouter construye el Router del contrato (index.js:221-249).
 // countBand acumula un cliente en la banda del desglose (issue #645). La
 // banda "—" (desconocida) no cae en ninguna: suma ≤ total de clientes.
@@ -1512,6 +1581,7 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 	// coincidir. El downgrade (target más viejo) alerta con wording propio.
 	if p.firmwareAvailable != "" {
 		r.FirmwareOutdated = true
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
 		// Rama RouterOS (sondeo API): se conserva el aviso por ciclo como
 		// hasta #1411; la dedup de 5 min lo acota.
 		l.engine.Emit(AlertEvent{
@@ -1526,12 +1596,24 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 			Time:        "just now", RouterID: p.cfg.ID,
 		})
 	} else if p.cfg.FirmwareTarget != "" {
-		if fwCmp == fwNewer || fwCmp == fwAmbiguous {
-			r.FirmwareOutdated = true
+		// #1444: el target existe upstream → alerta normal de mismatch.
+		// Target desconocido upstream → aviso de configuración y SIN marca
+		// de desactualizado (un target inventado no es firmware viejo).
+		// Lista vacía (chequeo sin éxito aún) → comportamiento previo.
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
+		if l.firmwareTargetKnown(p.cfg.FirmwareTarget) {
+			if fwCmp == fwNewer || fwCmp == fwAmbiguous {
+				r.FirmwareOutdated = true
+			}
+			if p.board != nil {
+				l.evalFirmwareAlert(p.cfg.ID, name, r.Firmware, p.cfg.FirmwareTarget, fwCmp)
+			}
+		} else {
+			l.evalFirmwareUnknownTarget(p.cfg.ID, name, p.cfg.FirmwareTarget)
 		}
-		if p.board != nil {
-			l.evalFirmwareAlert(p.cfg.ID, name, r.Firmware, p.cfg.FirmwareTarget, fwCmp)
-		}
+	} else {
+		// Sin target configurado: el aviso de target desconocido queda resuelto.
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
 	}
 	if p.temp > thr {
 		r.HotMetric = "temp"

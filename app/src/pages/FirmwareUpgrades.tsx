@@ -652,6 +652,9 @@ export default function FirmwareUpgrades() {
         </div>
       )}
 
+      {/* #1444: estado del chequeo periódico de releases (cadencia + último chequeo). */}
+      <ReleasesCheckCard />
+
       {error && (
         <div className="flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-400">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
@@ -1507,4 +1510,104 @@ export default function FirmwareUpgrades() {
 
 function detectedVersionOf(item: FirmwareItem): string {
   return item.detectedVersion || item.currentVersion || ''
+}
+
+// #1444: tarjeta compacta del chequeo periódico de releases publicados:
+// cadencia configurable (igual de flexible que el test de velocidad WAN),
+// último chequeo y botón de comprobar ahora.
+function ReleasesCheckCard() {
+  const { t } = useTranslation()
+  const { isDemo } = useNetPulse()
+  const auth = useAuth()
+  const isAdmin = auth?.role === 'admin'
+  const [state, setState] = useState<{
+    versions: string[]
+    ts: number
+    available: boolean
+    intervalHours: number
+  } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (isDemo) return
+    let cancelled = false
+    fetch('/api/firmware/releases')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled && j) setState(j)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isDemo])
+
+  if (isDemo) return null
+
+  const checkNow = () => {
+    setBusy(true)
+    fetch('/api/firmware/releases/refresh', { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j) return
+        setState((prev) => (prev ? { ...prev, ts: j.ts ?? 0, available: true } : prev))
+      })
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+  const changeInterval = (h: number) => {
+    setState((prev) => (prev ? { ...prev, intervalHours: h } : prev))
+    void fetch('/api/firmware/releases/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalHours: h }),
+    }).catch(() => {})
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-text-primary">{t('firmwareUpgrades.releasesTitle')}</div>
+          <div className="mt-0.5 text-caption text-text-muted">{t('firmwareUpgrades.releasesCaption')}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-text-secondary">
+          <span>
+            {t('firmwareUpgrades.releasesLast')}:{' '}
+            <span className="text-text-primary">
+              {state && state.ts > 0
+                ? `${relTimeFromTs(state.ts)} · ${t('firmwareUpgrades.releasesVersions', { count: state.versions.length })}`
+                : t('firmwareUpgrades.releasesNever')}
+            </span>
+          </span>
+          <label className="flex items-center gap-1.5">
+            {t('firmwareUpgrades.releasesInterval')}
+            <select
+              value={state?.intervalHours ?? 24}
+              onChange={(ev) => changeInterval(Number(ev.target.value))}
+              disabled={!isAdmin}
+              className="h-8 rounded-lg border border-border bg-canvas px-2 text-sm text-text-primary disabled:opacity-60"
+              aria-label={t('firmwareUpgrades.releasesInterval')}
+            >
+              {[6, 12, 24, 48, 168].map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                  {t('firmwareUpgrades.releasesHours')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={checkNow}
+            disabled={busy || !isAdmin}
+            className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-canvas px-3 text-sm font-medium text-text-primary transition-colors hover:bg-elevated disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-4 w-4', busy && 'animate-spin')} strokeWidth={1.75} />
+            {t('firmwareUpgrades.releasesCheckNow')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }

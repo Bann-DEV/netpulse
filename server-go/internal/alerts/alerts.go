@@ -111,6 +111,10 @@ const (
 	// #1412: el target configurado es MÁS VIEJO que lo instalado (posible
 	// downgrade, casi siempre un target mal puesto).
 	HintFirmwareDowngrade = "firmware-downgrade-target"
+	// #1444: el target configurado NO figura entre los releases publicados
+	// de OpenWrt (chequeo periódico contra downloads.openwrt.org). Es un
+	// aviso de configuración, no una alerta de firmware desactualizado.
+	HintFirmwareUnknownTarget = "firmware-target-unknown"
 	HintWanDown           = "wan-down"
 	HintWifiWeak          = "wifi-weak"
 	HintGhostPort         = "ghost-port"
