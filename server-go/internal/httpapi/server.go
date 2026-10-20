@@ -288,6 +288,22 @@ func NewHandler(d Deps) http.Handler {
 	if s.imageResolver == nil {
 		s.imageResolver = firmware.NewImageResolver()
 	}
+	// #1434: las mutaciones del feed (mark-read, dismiss, resolve, silence)
+	// re-emiten el estado por SSE al instante. El poller solo broadcastea el
+	// snapshot al terminar cada ciclo de sondeo (decenas de segundos con
+	// SNMP): sin esto, Resumen y la campana se quedaban stale hasta el
+	// próximo ciclo o una reconexión. El evento "alerts" lleva la lista y el
+	// unread actualizados; el front lo aplica como parche del bundle.
+	if d.Adapter != nil && s.hub != nil {
+		if eng := d.Adapter.AlertsEngine(); eng != nil {
+			eng.SetOnChange(func() {
+				s.hub.Broadcast("alerts", map[string]any{
+					"alerts":       eng.List(),
+					"unreadAlerts": eng.UnreadCount(),
+				})
+			})
+		}
+	}
 	if s.boardVersionFn == nil {
 		s.boardVersionFn = s.detectedFirmwareVersion
 	}
