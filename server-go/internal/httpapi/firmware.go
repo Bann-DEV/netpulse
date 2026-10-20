@@ -55,6 +55,9 @@ func (s *server) registerFirmwareRoutes(mux *http.ServeMux) {
 	s.registerFirmwareUploadRoutes(mux)
 	// Backups de config en el server (#1414).
 	s.registerFirmwareBackupRoutes(mux)
+	// Disponibilidad real de releases (#1444): lista cacheada, chequeo
+	// forzado y cadencia configurables.
+	s.registerFirmwareReleasesRoutes(mux)
 
 	mux.Handle("GET /api/firmware-upgrades", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.db == nil {

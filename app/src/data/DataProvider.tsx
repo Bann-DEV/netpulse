@@ -696,6 +696,26 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           /* payload inválido: se ignora */
         }
       })
+      // #1434: resync del feed tras una mutación (clear/mark-read/dismiss/
+      // resolve/silence). El poller solo emite snapshot al terminar cada
+      // ciclo de sondeo; sin este evento Resumen y la campana se quedaban
+      // stale hasta el próximo ciclo. Se aplica como parche del bundle.
+      es.addEventListener('alerts', (ev) => {
+        try {
+          const data = JSON.parse((ev as MessageEvent).data as string) as {
+            alerts?: AlertEvent[]
+            unreadAlerts?: number
+          }
+          if (!Array.isArray(data.alerts)) return
+          setBundle((prev) => ({
+            ...prev,
+            alerts: data.alerts as AlertEvent[],
+            unreadAlerts: typeof data.unreadAlerts === 'number' ? data.unreadAlerts : prev.unreadAlerts,
+          }))
+        } catch {
+          /* payload inválido: se ignora */
+        }
+      })
       es.onopen = () => {
         backoffIdx = 0
         stopPolling()

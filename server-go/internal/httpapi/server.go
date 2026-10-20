@@ -126,6 +126,9 @@ type Deps struct {
 	ConfigBackup *configbackup.Store
 	// Firmware: targets y upgrades de firmware (#453).
 	Firmware *firmware.Store
+	// FirmwareReleases refresca la lista de releases publicados (#1444).
+	// nil → las rutas /api/firmware/releases responden 503 (demo).
+	FirmwareReleases *firmware.ReleasesRefresher
 	// FirmwareImage resuelve la imagen de un router desde el índice de
 	// descargas (downloads.openwrt.org). nil → se construye el por defecto.
 	FirmwareImage *firmware.ImageResolver
@@ -245,6 +248,8 @@ type server struct {
 
 	// Firmware: targets y upgrades de firmware (#453).
 	firmware *firmware.Store
+	// FirmwareReleases: daemon del chequeo periódico de releases (#1444).
+	fwReleases *firmware.ReleasesRefresher
 	// imageResolver resuelve la imagen de un router (downloads.openwrt.org).
 	imageResolver *firmware.ImageResolver
 	// FirmwareEngine: motor compartido de upgrades (manual + programados #494).
@@ -281,12 +286,29 @@ func NewHandler(d Deps) http.Handler {
 		firmware:        d.Firmware,
 		firmwareEngine:  firmware.NewEngine(d.Firmware, d.AgentHub),
 		imageResolver:   d.FirmwareImage,
+		fwReleases:      d.FirmwareReleases,
 		speedtest:       d.Speedtest,
 		alertEmitter:    d.AlertEmitter,
 		mqtt:            d.MQTT,
 	}
 	if s.imageResolver == nil {
 		s.imageResolver = firmware.NewImageResolver()
+	}
+	// #1434: las mutaciones del feed (mark-read, dismiss, resolve, silence)
+	// re-emiten el estado por SSE al instante. El poller solo broadcastea el
+	// snapshot al terminar cada ciclo de sondeo (decenas de segundos con
+	// SNMP): sin esto, Resumen y la campana se quedaban stale hasta el
+	// próximo ciclo o una reconexión. El evento "alerts" lleva la lista y el
+	// unread actualizados; el front lo aplica como parche del bundle.
+	if d.Adapter != nil && s.hub != nil {
+		if eng := d.Adapter.AlertsEngine(); eng != nil {
+			eng.SetOnChange(func() {
+				s.hub.Broadcast("alerts", map[string]any{
+					"alerts":       eng.List(),
+					"unreadAlerts": eng.UnreadCount(),
+				})
+			})
+		}
 	}
 	if s.boardVersionFn == nil {
 		s.boardVersionFn = s.detectedFirmwareVersion

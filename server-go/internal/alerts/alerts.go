@@ -111,6 +111,10 @@ const (
 	// #1412: el target configurado es MÁS VIEJO que lo instalado (posible
 	// downgrade, casi siempre un target mal puesto).
 	HintFirmwareDowngrade = "firmware-downgrade-target"
+	// #1444: el target configurado NO figura entre los releases publicados
+	// de OpenWrt (chequeo periódico contra downloads.openwrt.org). Es un
+	// aviso de configuración, no una alerta de firmware desactualizado.
+	HintFirmwareUnknownTarget = "firmware-target-unknown"
 	HintWanDown           = "wan-down"
 	HintWifiWeak          = "wifi-weak"
 	HintGhostPort         = "ghost-port"
@@ -241,6 +245,12 @@ type Engine struct {
 	// (issue #798). false solo en el dataset demo, que es sintético y se
 	// regenera en cada arranque (cargar/re-guardar duplicaría las semillas).
 	persistLog bool
+
+	// onChange (#1434): callback invocado SIN e.mu tras una mutación que
+	// altera la lista servida o el read-state (mark-read, dismiss, resolve,
+	// silence). El server lo usa para reemitir el estado del feed por SSE
+	// al instante; el poller ya no es el único camino de actualización.
+	onChange func()
 }
 
 // PersistMaxEvents es la cota de filas del log persistido (issue #798): la
@@ -424,6 +434,16 @@ func (e *Engine) SetSuppression(g *SuppressionGraph) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.suppression = g
+}
+
+// SetOnChange (#1434) fija el callback de mutación del feed. Se invoca DESPUÉS
+// de soltar e.mu, así que el receptor puede leer el engine (List/UnreadCount)
+// sin riesgo de deadlock; solo hay que evitar mutar el engine desde dentro
+// (recursión de notificaciones).
+func (e *Engine) SetOnChange(f func()) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onChange = f
 }
 
 // Config devuelve una copia de la config efectiva (siempre las 6 claves).
@@ -828,12 +848,20 @@ func (e *Engine) UnreadCount() int {
 
 // MarkRead marca IDs como leídos (persiste; cap 200 FIFO sobre los IDs que
 // ya NO son visibles; una alerta visible leída nunca vuelve a no-leída).
+// #1434: si algo cambió, avisa a OnChange (el server re-emite el estado del
+// feed por SSE para que Resumen/campana se actualicen al instante).
 func (e *Engine) MarkRead(ids ...string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	changed := false
 	for _, id := range ids {
 		if id == "" || e.readSet[id] {
 			continue
+		}
+		// La notificación solo cuenta cuando la alerta existe en el feed:
+		// marcar leído un ID ajeno (o de un episodio ya cerrado) persiste
+		// el leído como siempre, pero no cambia nada visible que reemitir.
+		if e.idInListLocked(id) {
+			changed = true
 		}
 		e.readSet[id] = true
 		e.readOrd = append(e.readOrd, id)
@@ -844,6 +872,11 @@ func (e *Engine) MarkRead(ids ...string) {
 	}
 	e.pruneReadOrdLocked()
 	e.saveReadLocked()
+	cb := e.onChange
+	e.mu.Unlock()
+	if changed && cb != nil {
+		cb()
+	}
 }
 
 // pruneReadOrdLocked poda el FIFO del read-set, PERO sin expulsar IDs que
@@ -907,13 +940,14 @@ func (e *Engine) MarkAllRead() {
 // conjunto (ver insertaLocked). IDs desconocidos se ignoran.
 func (e *Engine) Dismiss(ids ...string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	changed := false
+	seen := false
 	drop := map[string]bool{}
 	for _, id := range ids {
 		if id == "" {
 			continue
 		}
+		seen = true
 		if !e.dismissed[id] {
 			e.dismissed[id] = true
 			changed = true
@@ -934,12 +968,21 @@ func (e *Engine) Dismiss(ids ...string) {
 		e.saveReadLocked()
 	}
 	kept := e.list[:0]
+	droppedAny := false
 	for _, ev := range e.list {
 		if !drop[ev.ID] {
 			kept = append(kept, ev)
+		} else {
+			droppedAny = true
 		}
 	}
 	e.list = kept
+	cb := e.onChange
+	e.mu.Unlock()
+	// #1434: el feed cambió -> el server re-emite el estado por SSE.
+	if seen && (changed || droppedAny) && cb != nil {
+		cb()
+	}
 }
 
 // DismissAll limpia TODAS las alertas del feed: equivale a Dismiss sobre
@@ -984,7 +1027,7 @@ func (e *Engine) Resolve(id string) {
 		return
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	found := false
 	for i, ev := range e.list {
 		if ev.ID == id {
 			e.list = append(e.list[:i], e.list[i+1:]...)
@@ -992,6 +1035,7 @@ func (e *Engine) Resolve(id string) {
 			// nuevo y debe poder alertar de inmediato (sin esperar al
 			// expirar la ventana de dedup de 5 min).
 			delete(e.dedup, ev.Category+"|"+ev.Title+"|"+ev.RouterID)
+			found = true
 			break
 		}
 	}
@@ -1018,6 +1062,13 @@ func (e *Engine) Resolve(id string) {
 		// ID estable, el upsert (resolved_ts=0) no puede heredar un leído
 		// viejo de la fila conservada (#1107 sigue valiendo).
 		_, _ = e.db.Exec("UPDATE alert_log SET resolved_ts = ?, read_flag = 0 WHERE id = ?", time.Now().Unix(), id)
+	}
+	cb := e.onChange
+	e.mu.Unlock()
+	// #1434: la lista del feed cambió -> el server re-emite el estado por
+	// SSE para que Resumen/campana se actualicen al instante.
+	if found && cb != nil {
+		cb()
 	}
 }
 
@@ -1064,7 +1115,6 @@ func (e *Engine) Remove(ids ...string) {
 // silenced, or empty string if the alert ID was not found.
 func (e *Engine) Silence(id string, dur time.Duration) string {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	var dedupKey string
 	for _, ev := range e.list {
 		if ev.ID == id {
@@ -1073,6 +1123,7 @@ func (e *Engine) Silence(id string, dur time.Duration) string {
 		}
 	}
 	if dedupKey == "" {
+		e.mu.Unlock()
 		return ""
 	}
 	var expiry int64
@@ -1081,15 +1132,25 @@ func (e *Engine) Silence(id string, dur time.Duration) string {
 	}
 	e.silenceMap[dedupKey] = expiry
 	e.saveSilenceLocked()
+	cb := e.onChange
+	e.mu.Unlock()
+	// #1434: la lista servida cambia (la alerta queda filtrada).
+	if cb != nil {
+		cb()
+	}
 	return dedupKey
 }
 
 // Unsilence removes the silence for a dedup key.
 func (e *Engine) Unsilence(dedupKey string) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.silenceMap, dedupKey)
 	e.saveSilenceLocked()
+	cb := e.onChange
+	e.mu.Unlock()
+	if cb != nil {
+		cb()
+	}
 }
 
 // Silenced returns all currently silenced dedup keys with their expiry times.

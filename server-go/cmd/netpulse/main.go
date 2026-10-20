@@ -497,6 +497,16 @@ func run() error {
 	// compartido (firmware.Engine) del flujo manual vía el AgentHub.
 	fwScheduler := firmware.NewScheduler(fwStore, firmware.NewEngine(fwStore, agentHub))
 
+	// Chequeo periódico de releases publicados (#1444): mantiene en kv la
+	// lista real de versiones OpenWrt (mismo host que el resolver de
+	// imágenes) y la publica en el adapter para el gating de la alerta de
+	// firmware. Demo: nil (las rutas responden 503).
+	var fwReleases *firmware.ReleasesRefresher
+	if live, ok := adapter.(*adapters.Live); ok {
+		fwReleases = firmware.NewReleasesRefresher(dbHandle.DB, firmware.DefaultImageBase)
+		fwReleases.SetSink(live.SetFirmwareReleases)
+	}
+
 	// Fase 9 R2/R3: TLS autofirmado + pairing token (on-box only).
 	// Se generan ANTES del handler para que serverFP esté disponible en Deps.
 	var (
@@ -762,6 +772,7 @@ func run() error {
 		PathAnalysis:    pathStore,
 		ConfigBackup:    cfgBackup,
 		Firmware:        fwStore,
+		FirmwareReleases: fwReleases,
 		Speedtest:       stScheduler,
 		AlertEmitter:    adapter.AlertsEngine(),
 		ChannelPlan:     chPlan,
@@ -837,6 +848,9 @@ func run() error {
 		mqttMgr.Start()
 		upd.Start()
 		go fwScheduler.Start()
+		if fwReleases != nil {
+			go fwReleases.Start()
+		}
 		if eventsCollector != nil {
 			eventsCollector.Start()
 		}
@@ -880,6 +894,9 @@ func run() error {
 		p.Stop()
 		upd.Stop()
 		fwScheduler.Stop()
+		if fwReleases != nil {
+			fwReleases.Stop()
+		}
 		if eventsCollector != nil {
 			eventsCollector.Stop()
 		}

@@ -147,6 +147,10 @@ export default function FirmwareUpgrades() {
   const [owutDlOutput, setOwutDlOutput] = useState<Record<string, string>>({})
   const [uploadBusy, setUploadBusy] = useState<Record<string, boolean>>({})
   const [uploadInfo, setUploadInfo] = useState<Record<string, { name: string; size: number; checksum: string }>>({})
+  // #1414: SHA256 de referencia introducido por el admin para contrastarlo
+  // con el calculado por el server al subir la imagen.
+  const [uploadExpected, setUploadExpected] = useState<Record<string, string>>({})
+  const [uploadVerify, setUploadVerify] = useState<Record<string, 'match' | 'mismatch'>>({})
   // #1414: backups de config en el server (lista perezosa por tarjeta).
   const [fwBackups, setFwBackups] = useState<Record<string, { name: string; size: number; ts: number }[]>>({})
   const [fwBackupsLoaded, setFwBackupsLoaded] = useState<Record<string, boolean>>({})
@@ -492,6 +496,18 @@ export default function FirmwareUpgrades() {
       const body = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(body?.error?.message ?? body?.message ?? `HTTP ${res.status}`)
       setUploadInfo((prev) => ({ ...prev, [id]: { name: body.name ?? file.name, size: body.size ?? file.size, checksum: body.checksum ?? '' } }))
+      // #1414: contrasta con el SHA256 de referencia, si el admin lo dio.
+      const expected = (uploadExpected[id] ?? '').trim().toLowerCase()
+      const computed = (body.checksum ?? '').trim().toLowerCase()
+      if (expected && computed) {
+        setUploadVerify((prev) => ({ ...prev, [id]: expected === computed ? 'match' : 'mismatch' }))
+      } else {
+        setUploadVerify((prev) => {
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+      }
       await fetchItems()
     } catch (err) {
       setError(String(err))
@@ -651,6 +667,9 @@ export default function FirmwareUpgrades() {
           <span>{t('common.adminOnly')}</span>
         </div>
       )}
+
+      {/* #1444: estado del chequeo periódico de releases (cadencia + último chequeo). */}
+      <ReleasesCheckCard />
 
       {error && (
         <div className="flex items-start gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-600 dark:text-rose-400">
@@ -1040,6 +1059,32 @@ export default function FirmwareUpgrades() {
                 <div className="mt-3 rounded-lg border border-border bg-canvas px-3 py-2.5">
                   <p className="text-sm font-medium text-text-secondary">{t('firmwareUpgrades.uploadTitle')}</p>
                   <p className="mt-0.5 text-xs text-text-muted">{t('firmwareUpgrades.uploadHint')}</p>
+                  {/* #1414: SHA256 de referencia (de la publicación de la
+                      imagen) para contrastar con el calculado al subir. */}
+                  <label className="mt-2 flex flex-col gap-1">
+                    <span className="text-caption text-text-muted">{t('firmwareUpgrades.uploadExpected')}</span>
+                    <input
+                      type="text"
+                      value={uploadExpected[item.routerId] ?? ''}
+                      onChange={(ev) => {
+                        const v = ev.target.value
+                        setUploadExpected((prev) => ({ ...prev, [item.routerId]: v }))
+                        const computed = (uploaded?.checksum ?? '').trim().toLowerCase()
+                        const expected = v.trim().toLowerCase()
+                        setUploadVerify((prev) => {
+                          const next = { ...prev }
+                          if (expected && computed) next[item.routerId] = expected === computed ? 'match' : 'mismatch'
+                          else delete next[item.routerId]
+                          return next
+                        })
+                      }}
+                      disabled={!isAdmin}
+                      placeholder={t('firmwareUpgrades.uploadExpectedPlaceholder')}
+                      spellCheck={false}
+                      autoComplete="off"
+                      className="rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-text-primary disabled:opacity-60"
+                    />
+                  </label>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <input
                       type="file"
@@ -1055,11 +1100,31 @@ export default function FirmwareUpgrades() {
                     {uploadBusy[item.routerId] && <span className="text-xs text-text-muted">{t('firmwareUpgrades.uploadBusy')}</span>}
                   </div>
                   {hasUploadedImage && (
-                    <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
-                      {uploaded
-                        ? t('firmwareUpgrades.uploadedInfo', { name: uploaded.name, size: Math.round((uploaded.size / 1024 / 1024) * 10) / 10 })
-                        : t('firmwareUpgrades.uploadedSaved')}
-                    </p>
+                    <div className="mt-2 space-y-1 text-xs">
+                      <p className="text-emerald-700 dark:text-emerald-300">
+                        {uploaded
+                          ? t('firmwareUpgrades.uploadedInfo', { name: uploaded.name, size: Math.round((uploaded.size / 1024 / 1024) * 10) / 10 })
+                          : t('firmwareUpgrades.uploadedSaved')}
+                      </p>
+                      {uploaded?.checksum && (
+                        <p className="break-all font-mono text-text-muted">
+                          {t('firmwareUpgrades.uploadComputed')}: {uploaded.checksum}
+                        </p>
+                      )}
+                      {uploadVerify[item.routerId] === 'match' && (
+                        <p className="font-medium text-emerald-700 dark:text-emerald-300">{t('firmwareUpgrades.uploadChecksumMatch')}</p>
+                      )}
+                      {uploadVerify[item.routerId] === 'mismatch' && (
+                        <p className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 font-medium text-rose-600 dark:text-rose-400">
+                          {t('firmwareUpgrades.uploadChecksumMismatch')}
+                        </p>
+                      )}
+                      {uploaded?.checksum && !uploadVerify[item.routerId] && !(uploadExpected[item.routerId] ?? '').trim() && (
+                        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                          {t('firmwareUpgrades.uploadChecksumNote')}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
@@ -1121,53 +1186,72 @@ export default function FirmwareUpgrades() {
                         type="button"
                         onClick={() => void installOwut(item.routerId)}
                         disabled={installBusy[item.routerId]}
+                        title={t('firmwareUpgrades.tipInstallOwut')}
                         className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
                       >
                         <Download className={cn('h-4 w-4', installBusy[item.routerId] && 'animate-pulse')} strokeWidth={1.75} />
                         {installBusy[item.routerId] ? t('firmwareUpgrades.installingOwut') : t('firmwareUpgrades.installOwut')}
                       </button>
                     )}
+                    {/* #1414 (feedback #1414): los tres pasos owut van juntos
+                        y en orden, separados del "Actualizar" a pelo. El
+                        grupo lleva tooltips que explican qué hace cada botón. */}
                     {(m === 'auto' || m === 'owut') && (
-                    <button
-                      type="button"
-                      onClick={() => void runOwutCheck(item.routerId)}
-                      disabled={owutBusy[item.routerId] || !owutAvail}
-                      title={!owutAvail ? t('firmwareUpgrades.owutUnavailable') : t('firmwareUpgrades.checkTooltip')}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
-                    >
-                      <Terminal className={cn('h-4 w-4', owutBusy[item.routerId] && 'animate-pulse')} strokeWidth={1.75} />
-                      {owutBusy[item.routerId] ? t('firmwareUpgrades.owutBusy') : t('firmwareUpgrades.check')}
-                    </button>
-                    )}
-                    {(m === 'auto' || m === 'owut') && owutAvail && (
-                      <>
+                      <div
+                        className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface px-2.5 py-2"
+                        role="group"
+                        aria-label={t('firmwareUpgrades.owutStepsGroup')}
+                      >
                         <button
                           type="button"
-                          onClick={() => void runOwutDownload(item.routerId)}
-                          disabled={owutDlBusy[item.routerId] || !!active}
+                          onClick={() => void runOwutCheck(item.routerId)}
+                          disabled={owutBusy[item.routerId] || !owutAvail}
+                          title={!owutAvail ? t('firmwareUpgrades.owutUnavailable') : t('firmwareUpgrades.checkTooltip')}
                           className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
                         >
-                          <Download className={cn('h-4 w-4', owutDlBusy[item.routerId] && 'animate-pulse')} strokeWidth={1.75} />
-                          {owutDlBusy[item.routerId] ? t('firmwareUpgrades.owutDownloading') : t('firmwareUpgrades.owutDownload')}
+                          <Terminal className={cn('h-4 w-4', owutBusy[item.routerId] && 'animate-pulse')} strokeWidth={1.75} />
+                          {owutBusy[item.routerId] ? t('firmwareUpgrades.owutBusy') : t('firmwareUpgrades.check')}
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => void runOwutInstallImage(item.routerId)}
-                          disabled={!!active || busy[item.routerId] === 'upgrade' || scheduled}
-                          className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
-                        >
-                          <Rocket className="h-4 w-4" strokeWidth={1.75} />
-                          {t('firmwareUpgrades.owutInstallImage')}
-                        </button>
-                      </>
+                        {owutAvail && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void runOwutDownload(item.routerId)}
+                              disabled={owutDlBusy[item.routerId] || !!active}
+                              title={t('firmwareUpgrades.tipOwutDownload')}
+                              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
+                            >
+                              <Download className={cn('h-4 w-4', owutDlBusy[item.routerId] && 'animate-pulse')} strokeWidth={1.75} />
+                              {owutDlBusy[item.routerId] ? t('firmwareUpgrades.owutDownloading') : t('firmwareUpgrades.owutDownload')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void runOwutInstallImage(item.routerId)}
+                              disabled={!!active || busy[item.routerId] === 'upgrade' || scheduled}
+                              title={t('firmwareUpgrades.tipOwutInstallImage')}
+                              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
+                            >
+                              <Rocket className="h-4 w-4" strokeWidth={1.75} />
+                              {t('firmwareUpgrades.owutInstallImage')}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     )}
-                    <button
-                      onClick={() => saveTarget(item.routerId)}
-                      disabled={busy[item.routerId] === 'save' || !e.targetVersion || !e.model}
-                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-canvas transition-colors hover:bg-accent/90 disabled:opacity-50"
-                    >
-                      {busy[item.routerId] === 'save' ? t('common.loading') : t('common.save')}
-                    </button>
+                    {/* #1414: en modo owut el "Guardar" no hace nada útil (el
+                        target viaja en el cuerpo de owut-upgrade; era
+                        heredado del flujo URL). Solo se muestra para los
+                        métodos que persisten target para el flujo clásico. */}
+                    {m !== 'owut' && (
+                      <button
+                        onClick={() => saveTarget(item.routerId)}
+                        disabled={busy[item.routerId] === 'save' || !e.targetVersion || !e.model}
+                        title={t('firmwareUpgrades.tipSave')}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-canvas transition-colors hover:bg-accent/90 disabled:opacity-50"
+                      >
+                        {busy[item.routerId] === 'save' ? t('common.loading') : t('common.save')}
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         if (owutAvail && (m === 'auto' || m === 'owut')) {
@@ -1181,6 +1265,7 @@ export default function FirmwareUpgrades() {
                         }
                       }}
                       disabled={active || busy[item.routerId] === 'upgrade' || scheduled || (!targetSel && !(m === 'upload' && hasUploadedImage))}
+                      title={owutAvail && (m === 'auto' || m === 'owut') ? t('firmwareUpgrades.tipUpgradeOwut') : undefined}
                       className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
                     >
                       {active
@@ -1197,6 +1282,7 @@ export default function FirmwareUpgrades() {
                         setScheduleId(item.routerId)
                       }}
                       disabled={active}
+                      title={t('firmwareUpgrades.tipSchedule')}
                       className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-elevated px-4 text-sm font-medium text-text-primary transition-colors hover:bg-canvas disabled:opacity-50"
                     >
                       <CalendarClock className="h-4 w-4 text-accent" strokeWidth={1.75} />
@@ -1507,4 +1593,104 @@ export default function FirmwareUpgrades() {
 
 function detectedVersionOf(item: FirmwareItem): string {
   return item.detectedVersion || item.currentVersion || ''
+}
+
+// #1444: tarjeta compacta del chequeo periódico de releases publicados:
+// cadencia configurable (igual de flexible que el test de velocidad WAN),
+// último chequeo y botón de comprobar ahora.
+function ReleasesCheckCard() {
+  const { t } = useTranslation()
+  const { isDemo } = useNetPulse()
+  const auth = useAuth()
+  const isAdmin = auth?.role === 'admin'
+  const [state, setState] = useState<{
+    versions: string[]
+    ts: number
+    available: boolean
+    intervalHours: number
+  } | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (isDemo) return
+    let cancelled = false
+    fetch('/api/firmware/releases')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled && j) setState(j)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isDemo])
+
+  if (isDemo) return null
+
+  const checkNow = () => {
+    setBusy(true)
+    fetch('/api/firmware/releases/refresh', { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j) return
+        setState((prev) => (prev ? { ...prev, ts: j.ts ?? 0, available: true } : prev))
+      })
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+  const changeInterval = (h: number) => {
+    setState((prev) => (prev ? { ...prev, intervalHours: h } : prev))
+    void fetch('/api/firmware/releases/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalHours: h }),
+    }).catch(() => {})
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-text-primary">{t('firmwareUpgrades.releasesTitle')}</div>
+          <div className="mt-0.5 text-caption text-text-muted">{t('firmwareUpgrades.releasesCaption')}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-text-secondary">
+          <span>
+            {t('firmwareUpgrades.releasesLast')}:{' '}
+            <span className="text-text-primary">
+              {state && state.ts > 0
+                ? `${relTimeFromTs(state.ts)} · ${t('firmwareUpgrades.releasesVersions', { count: state.versions.length })}`
+                : t('firmwareUpgrades.releasesNever')}
+            </span>
+          </span>
+          <label className="flex items-center gap-1.5">
+            {t('firmwareUpgrades.releasesInterval')}
+            <select
+              value={state?.intervalHours ?? 24}
+              onChange={(ev) => changeInterval(Number(ev.target.value))}
+              disabled={!isAdmin}
+              className="h-8 rounded-lg border border-border bg-canvas px-2 text-sm text-text-primary disabled:opacity-60"
+              aria-label={t('firmwareUpgrades.releasesInterval')}
+            >
+              {[6, 12, 24, 48, 168].map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                  {t('firmwareUpgrades.releasesHours')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={checkNow}
+            disabled={busy || !isAdmin}
+            className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-canvas px-3 text-sm font-medium text-text-primary transition-colors hover:bg-elevated disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-4 w-4', busy && 'animate-spin')} strokeWidth={1.75} />
+            {t('firmwareUpgrades.releasesCheckNow')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }

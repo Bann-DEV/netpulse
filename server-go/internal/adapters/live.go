@@ -285,6 +285,12 @@ type Live struct {
 	// cambia la versión o el target, y se resuelve al coincidir). Protegido
 	// por mu.
 	fwAlert map[string]fwAlertState
+	// #1444: lista cacheada de releases publicados de OpenWrt (la publica el
+	// ReleasesRefresher tras cada chequeo periódico) y episodios abiertos del
+	// aviso "target no disponible upstream" (routerID → target alertado).
+	fwReleases      []string
+	fwReleasesTs    int64
+	fwUnknownTarget map[string]string
 
 	// snmpFdbCount (#928): último conteo de entradas FDB por router SNMP,
 	// para loguear solo cuando el resultado cambia.
@@ -318,10 +324,19 @@ type Live struct {
 	engine        *alerts.Engine
 	wgActive      map[string]bool
 	wgActiveSince map[string]time.Time // when each active peer became active (disconnect duration)
+	// wgPrimed (#1443): la primera pasada tras el arranque NO emite connects
+	// (warmup: los peers activos al boot no son "conexiones"). Antes el
+	// warmup se deducía de len(wgActive)>0, que además tragaba la primera
+	// conexión real cuando el ciclo previo no tenía ningún peer activo
+	// (túnel iniciado por la unidad local tras estar caído).
+	wgPrimed bool
 	// wgUrgent (#1441): claves de peer (WGPeer.Key) marcadas como urgentes:
 	// sus caídas avisan (Urgent=true en la alerta), las del resto solo van al
 	// log. Persistido en kv (wgUrgentKey).
 	wgUrgent map[string]bool
+	// wgUrgentMiss (#1445): ausencias consecutivas del peer en el dump por
+	// clave urgente; a wgUrgentPruneMisses seguidas se recoge el flag.
+	wgUrgentMiss map[string]int
 	// weakStates (#1452): estado del ciclo de vida de la alerta de señal
 	// débil por MAC (antes sólo se guardaba el último disparo). La máquina
 	// pura vive en alerts.WeakSignalStep.
@@ -465,6 +480,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		lastGood:             map[string]*Router{},
 		lastStatus:           map[string]string{},
 		fwAlert:              map[string]fwAlertState{},
+		fwUnknownTarget:      map[string]string{},
 		boardCache:           map[string]*BoardInfo{},
 		layoutCache:          map[string][]PortLayout{},
 		extrasCache:          map[string]*extrasSnapshot{},
@@ -488,6 +504,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		wgActive:             map[string]bool{},
 		wgActiveSince:        map[string]time.Time{},
 		wgUrgent:             map[string]bool{},
+		wgUrgentMiss:         map[string]int{},
 		weakStates:           map[string]alerts.WeakSignalState{},
 		onlineMacs:           map[string]bool{},
 		unknownGrace:         map[string]int{},
@@ -1338,6 +1355,68 @@ func (l *Live) evalFirmwareAlert(routerID, name, installed, target string, cmp i
 	l.engine.EmitOrUpdate(ev)
 }
 
+// SetFirmwareReleases (#1444) publica la lista cacheada de releases
+// publicados (la alimenta el ReleasesRefresher tras cada chequeo periódico).
+func (l *Live) SetFirmwareReleases(v []string, ts int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fwReleases = append([]string(nil), v...)
+	l.fwReleasesTs = ts
+}
+
+// firmwareTargetKnown (#1444): ¿figura el target entre los releases
+// publicados? Con la lista vacía (chequeo aún sin éxito) NO se gatea: se
+// conserva el comportamiento previo en flotas sin salida a
+// downloads.openwrt.org.
+func (l *Live) firmwareTargetKnown(target string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.fwReleases) == 0 {
+		return true
+	}
+	for _, v := range l.fwReleases {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+// evalFirmwareUnknownTarget (#1444): episodio del aviso "el target no existe
+// upstream" (configuración, no firmware desactualizado). target == "" resuelve
+// el episodio (target corregido, retirado o vuelto conocido).
+func (l *Live) evalFirmwareUnknownTarget(routerID, name, target string) {
+	id := "alert-fw-target-unknown-" + routerID
+	l.mu.Lock()
+	if l.fwUnknownTarget == nil {
+		l.fwUnknownTarget = map[string]string{}
+	}
+	if target == "" {
+		_, active := l.fwUnknownTarget[routerID]
+		delete(l.fwUnknownTarget, routerID)
+		l.mu.Unlock()
+		if active {
+			l.engine.Resolve(id)
+		}
+		return
+	}
+	if prev, active := l.fwUnknownTarget[routerID]; active && prev == target {
+		l.mu.Unlock()
+		return
+	}
+	l.fwUnknownTarget[routerID] = target
+	l.mu.Unlock()
+	l.engine.EmitOrUpdate(AlertEvent{
+		ID: id, Category: alerts.CatSystem, Urgent: false,
+		Severity: "warn", RouterID: routerID,
+		Title:       "Firmware target not available",
+		Description: fmt.Sprintf("%s: configured target %q is not among the published OpenWrt releases", name, target),
+		Type:        alerts.HintFirmwareUnknownTarget,
+		Vars:        map[string]string{"router": name, "target": target},
+		Time:        "just now",
+	})
+}
+
 // buildRouter construye el Router del contrato (index.js:221-249).
 // countBand acumula un cliente en la banda del desglose (issue #645). La
 // banda "—" (desconocida) no cae en ninguna: suma ≤ total de clientes.
@@ -1506,6 +1585,7 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 	// coincidir. El downgrade (target más viejo) alerta con wording propio.
 	if p.firmwareAvailable != "" {
 		r.FirmwareOutdated = true
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
 		// Rama RouterOS (sondeo API): se conserva el aviso por ciclo como
 		// hasta #1411; la dedup de 5 min lo acota.
 		l.engine.Emit(AlertEvent{
@@ -1520,12 +1600,24 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 			Time:        "just now", RouterID: p.cfg.ID,
 		})
 	} else if p.cfg.FirmwareTarget != "" {
-		if fwCmp == fwNewer || fwCmp == fwAmbiguous {
-			r.FirmwareOutdated = true
+		// #1444: el target existe upstream → alerta normal de mismatch.
+		// Target desconocido upstream → aviso de configuración y SIN marca
+		// de desactualizado (un target inventado no es firmware viejo).
+		// Lista vacía (chequeo sin éxito aún) → comportamiento previo.
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
+		if l.firmwareTargetKnown(p.cfg.FirmwareTarget) {
+			if fwCmp == fwNewer || fwCmp == fwAmbiguous {
+				r.FirmwareOutdated = true
+			}
+			if p.board != nil {
+				l.evalFirmwareAlert(p.cfg.ID, name, r.Firmware, p.cfg.FirmwareTarget, fwCmp)
+			}
+		} else {
+			l.evalFirmwareUnknownTarget(p.cfg.ID, name, p.cfg.FirmwareTarget)
 		}
-		if p.board != nil {
-			l.evalFirmwareAlert(p.cfg.ID, name, r.Firmware, p.cfg.FirmwareTarget, fwCmp)
-		}
+	} else {
+		// Sin target configurado: el aviso de target desconocido queda resuelto.
+		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
 	}
 	if p.temp > thr {
 		r.HotMetric = "temp"
@@ -2583,7 +2675,53 @@ func (l *Live) pollWireGuard(devices []Device) *WireGuardStats {
 	// Transitions run only on a successful poll: a failed poll would mark every
 	// previously active peer as spuriously disconnected.
 	l.applyWireGuardTransitions(stats, gw.ID)
+	// #1445: recoge los flags urgentes de peers que dejaron de existir.
+	l.pruneWGUrgent(stats.Peers)
 	return stats
+}
+
+// wgUrgentPruneMisses (#1445): ausencias consecutivas en el dump antes de
+// recoger un flag urgente. Un dump parcial (una interfaz no respondió, #714)
+// no borra flags de peers vivos; sólo desaparece del router de verdad quien
+// lleva varios sondeos seguidos sin aparecer.
+const wgUrgentPruneMisses = 3
+
+// pruneWGUrgent recoge las claves urgentes que llevan wgUrgentPruneMisses
+// sondeos seguidos sin casar con ningún peer configurado. Con dumps vacíos no
+// cuenta ausencias (no borra nada): sin peers no hay evidencia de nada.
+func (l *Live) pruneWGUrgent(peers []WGPeer) {
+	if len(peers) == 0 {
+		return
+	}
+	present := map[string]bool{}
+	for _, p := range peers {
+		k := p.Key
+		if k == "" {
+			k = p.ID
+		}
+		present[k] = true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	changed := false
+	for k := range l.wgUrgent {
+		if present[k] {
+			if l.wgUrgentMiss[k] != 0 {
+				delete(l.wgUrgentMiss, k)
+				changed = true
+			}
+			continue
+		}
+		l.wgUrgentMiss[k]++
+		if l.wgUrgentMiss[k] >= wgUrgentPruneMisses {
+			delete(l.wgUrgent, k)
+			delete(l.wgUrgentMiss, k)
+			changed = true
+		}
+	}
+	if changed {
+		l.saveWGUrgentLocked()
+	}
 }
 
 // applyWireGuardTransitions emits connect (handshake) and disconnect alerts for
@@ -2591,15 +2729,35 @@ func (l *Live) pollWireGuard(devices []Device) *WireGuardStats {
 // wgActive/wgActiveSince in sync. A peer that was never active cannot emit a
 // disconnect; the first post-boot cycle never emits a connect (warmup).
 //
+// #1443: el tracker se indexa por Key (pubkey base64url estable, #1441) con
+// fallback a ID: WGPeer.ID puede cambiar entre sondeos ("peer-<idx>" según
+// la posición en el dump) y un cambio de identificador simulaba un
+// disconnect+connect fantasma. Los eventos de transición salen por
+// EmitNoDedup: cada uno es un incidente real (un connect y un disconnect
+// del mismo peer llevan el mismo título y el dedup de 5 min se comía los
+// flaps). El warmup es un flag propio (wgPrimed), no len(wgActive)>0: con
+// el guarda viejo, la primera conexión de un túnel iniciado por la unidad
+// local (ciclo previo con 0 peers activos) se perdía para siempre.
+//
 // #1441: la alerta de un peer URGENTE sale con Urgent=true (aviso push); la de
 // un peer normal con Urgent=false (solo queda en el log). La categoría y los
 // IDs no cambian: lo único que distingue a un site-to-site de un portátil es
 // el flag que puso el admin.
 func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
+	// wgTrackKey: identidad estable del peer para el tracker (#1443).
+	wgTrackKey := func(p WGPeer) string {
+		if p.Key != "" {
+			return p.Key
+		}
+		return p.ID
+	}
 	activeNow := map[string]bool{}
+	peerByKey := map[string]WGPeer{}
 	for _, p := range stats.Peers {
+		k := wgTrackKey(p)
+		peerByKey[k] = p
 		if p.Active {
-			activeNow[p.ID] = true
+			activeNow[k] = true
 		}
 	}
 	l.mu.Lock()
@@ -2608,26 +2766,28 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 	// el llamador construyó los WGPeer a mano, se cruza con el conjunto
 	// persistido por Key o por ID.
 	urgentNow := map[string]bool{}
-	for _, p := range stats.Peers {
-		urgentNow[p.ID] = p.Urgent || l.wgUrgent[p.Key] || l.wgUrgent[p.ID]
+	for k, p := range peerByKey {
+		urgentNow[k] = p.Urgent || l.wgUrgent[p.Key] || l.wgUrgent[p.ID]
 	}
 
 	// Disconnects: previously active peers no longer present in activeNow.
+	// #1445: si el peer desapareció del dump en el mismo ciclo de su caída,
+	// urgentNow no lo ve: se respalda con el conjunto persistido (la clave
+	// trackeada ES la Key, así que l.wgUrgent[id] devuelve su flag aunque el
+	// peer no esté en la muestra).
 	for id := range l.wgActive {
 		if activeNow[id] {
 			continue
 		}
 		name := id
-		for _, p := range stats.Peers {
-			if p.ID == id {
-				name = p.Name
-			}
+		if p, ok := peerByKey[id]; ok {
+			name = p.Name
 		}
 		dur := wgDuration(time.Since(l.wgActiveSince[id]))
-		l.engine.Emit(AlertEvent{
+		l.engine.EmitNoDedup(AlertEvent{
 			ID:          fmt.Sprintf("alert-wg-down-%s-%d", id, time.Now().UnixMilli()),
 			Category:    alerts.CatVPN,
-			Urgent:      urgentNow[id],
+			Urgent:      urgentNow[id] || l.wgUrgent[id],
 			Severity:    "info",
 			Title:       "WireGuard disconnect",
 			Description: fmt.Sprintf("%s disconnected after %s", name, dur),
@@ -2638,19 +2798,19 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 		})
 		delete(l.wgActiveSince, id)
 	}
-	// Connects: newly active peers, skipping the first post-boot cycle.
+	// Connects: newly active peers, skipping the first post-boot cycle
+	// (warmup, wgPrimed) y sin dedup de 5 min: cada reconexión es un
+	// incidente propio que el operador espera ver (#1443).
 	for id := range activeNow {
 		if l.wgActive[id] {
 			continue
 		}
-		if len(l.wgActive) > 0 {
+		if l.wgPrimed {
 			name := id
-			for _, p := range stats.Peers {
-				if p.ID == id {
-					name = p.Name
-				}
+			if p, ok := peerByKey[id]; ok {
+				name = p.Name
 			}
-			l.engine.Emit(AlertEvent{
+			l.engine.EmitNoDedup(AlertEvent{
 				ID:          fmt.Sprintf("alert-wg-%s-%d", id, time.Now().UnixMilli()),
 				Category:    alerts.CatVPN,
 				Urgent:      urgentNow[id],
@@ -2666,6 +2826,7 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 		l.wgActiveSince[id] = time.Now()
 	}
 	l.wgActive = activeNow
+	l.wgPrimed = true
 }
 
 // wgDuration humanizes a WireGuard session duration as "Xh Ym" (hours and
@@ -3240,7 +3401,7 @@ func (l *Live) emitTempAlert(cfg RouterConfig, router Router) {
 }
 
 // computeHealth (index.js:462-486).
-func computeHealth(routers []Router, adguard *AdGuardStats) HealthScore {
+func computeHealth(routers []Router, adguard *AdGuardStats, wg *WireGuardStats) HealthScore {
 	score := 100
 	breakdown := []HealthDelta{}
 	wanScore := 100
@@ -3269,6 +3430,38 @@ func computeHealth(routers []Router, adguard *AdGuardStats) HealthScore {
 		score -= 5
 		svcScore -= 20
 		breakdown = append(breakdown, HealthDelta{Label: "AdGuard inactivo", Delta: -5})
+	}
+	// #1442: VPN en la nota de salud. "inactive" con interfaces descubiertas
+	// = túnel caído (quirk #714: sin interfaces WireGuard en el router el
+	// estado también es "inactive", pero Interface queda vacío y NO se
+	// penaliza: no hay nada que vigilar). Con la interfaz caída no se
+	// cuentan peers: están caídos por ella, no por sí mismos (no doble
+	// penalización). Cada peer importante (urgente, #1441) caído resta
+	// acotado para que uno solo no domine la nota.
+	if wg != nil && wg.Status != "active" && wg.Interface != "" {
+		score -= 10
+		svcScore -= 15
+		breakdown = append(breakdown, HealthDelta{Label: "WireGuard caído", Delta: -10})
+	} else if wg != nil {
+		urgentDown := []string{}
+		for _, p := range wg.Peers {
+			if p.Urgent && !p.Active {
+				urgentDown = append(urgentDown, p.Name)
+			}
+		}
+		if len(urgentDown) > 0 {
+			delta := 6 * len(urgentDown)
+			if delta > 12 {
+				delta = 12
+			}
+			score -= delta
+			svcScore -= delta + 3
+			if len(urgentDown) == 1 {
+				breakdown = append(breakdown, HealthDelta{Label: "peer WireGuard " + urgentDown[0] + " caído", Delta: -delta})
+			} else {
+				breakdown = append(breakdown, HealthDelta{Label: fmt.Sprintf("%d peers WireGuard importantes caídos", len(urgentDown)), Delta: -delta})
+			}
+		}
 	}
 	if score < 0 {
 		score = 0
@@ -3633,9 +3826,10 @@ func (l *Live) buildOverview(ctx context.Context) (*Overview, error) {
 		distNodes = filtered
 	}
 	fillUplinkSpeeds(polled, distNodes, topo.Links)
-	fillWiredSpeeds(polled, distNodes, topo.Links) // #1384
+	fillWiredSpeeds(polled, distNodes, topo.Links)             // #1384
+	fillUplinkSpeedsFromChild(polled, fdbEvidence, topo.Links) // #1429
 	return &Overview{
-		Health:  computeHealth(routerList, adguard),
+		Health:  computeHealth(routerList, adguard, wireguard),
 		WAN:     wan,
 		Traffic: TrafficByRange{H1: trafficOf("1h"), H24: trafficOf("24h"), D7: trafficOf("7d"), D30: trafficOf("30d")},
 		Adguard: ag, Wireguard: wgStats, Routers: routerList,
