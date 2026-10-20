@@ -321,9 +321,12 @@ type Live struct {
 	// wgUrgent (#1441): claves de peer (WGPeer.Key) marcadas como urgentes:
 	// sus caídas avisan (Urgent=true en la alerta), las del resto solo van al
 	// log. Persistido en kv (wgUrgentKey).
-	wgUrgent    map[string]bool
-	weakAlerted map[string]int64
-	onlineMacs  map[string]bool
+	wgUrgent map[string]bool
+	// weakStates (#1452): estado del ciclo de vida de la alerta de señal
+	// débil por MAC (antes sólo se guardaba el último disparo). La máquina
+	// pura vive en alerts.WeakSignalStep.
+	weakStates map[string]alerts.WeakSignalState
+	onlineMacs map[string]bool
 	// unknownGrace: ticks consecutivos online+sin nombre (Name == MAC) por
 	// MAC. unknownAlerted: MACs que ya dispararon la alerta de desconocido
 	// (issue #248, persistido en kv: cada MAC alerta UNA sola vez).
@@ -485,7 +488,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		wgActive:             map[string]bool{},
 		wgActiveSince:        map[string]time.Time{},
 		wgUrgent:             map[string]bool{},
-		weakAlerted:          map[string]int64{},
+		weakStates:           map[string]alerts.WeakSignalState{},
 		onlineMacs:           map[string]bool{},
 		unknownGrace:         map[string]int{},
 		unknownAlerted:       map[string]bool{},
@@ -3450,26 +3453,34 @@ func (l *Live) buildOverview(ctx context.Context) (*Overview, error) {
 		l.suppression.SetTopology(parents)
 	}
 	l.mu.Unlock()
-	// Aviso de señal débil: una alerta por dispositivo y día. Umbral
-	// configurable (alerts.weak_signal_dbm, default -70; #904: antes era
-	// -70 hardcodeado y el ajuste de Ajustes no cableaba a nada).
+	// Aviso de señal débil con ciclo de vida completo (#1452): un episodio
+	// abierto por MAC, disparo con guarda de 24 h entre episodios y cierre
+	// automático cuando la señal se mantiene por encima del umbral + margen
+	// de histéresis durante N muestras consecutivas. Un cliente sin datos
+	// (offline o sin señal reportada) no cuenta como recuperado. La
+	// itinerancia no abre ni cierra nada: se juzga la señal del cliente.
 	var weakSignalDB *sql.DB
 	if l.db != nil {
 		weakSignalDB = l.db.DB
 	}
 	weakDbm := alerts.WeakSignalDbm(weakSignalDB)
-	for _, d := range devices {
-		if d.Online && d.SignalDbm != nil && *d.SignalDbm < weakDbm {
-			l.mu.Lock()
-			last := l.weakAlerted[d.MAC]
-			if time.Now().UnixMilli()-last > 24*3600e3 {
-				l.weakAlerted[d.MAC] = time.Now().UnixMilli()
-				routerName := l.routerDisplayName(d.RouterID)
-				if routerName == "" {
-					routerName = d.RouterID
-				}
+	weakHyst := alerts.WeakSignalHysteresisDbm(weakSignalDB)
+	weakSamples := alerts.WeakSignalResolveSamples(weakSignalDB)
+	weakNow := time.Now().UnixMilli()
+	for i := range devices {
+		d := &devices[i]
+		l.mu.Lock()
+		st := l.weakStates[d.MAC]
+		fireID, resolveID, episodeStart := alerts.WeakSignalStep(&st, d.MAC, d.SignalDbm, d.Online, weakDbm, weakHyst, weakSamples, weakNow)
+		l.weakStates[d.MAC] = st
+		if fireID != "" || resolveID != "" {
+			routerName := l.routerDisplayName(d.RouterID)
+			if routerName == "" {
+				routerName = d.RouterID
+			}
+			if fireID != "" {
 				l.engine.Emit(AlertEvent{
-					ID:       fmt.Sprintf("alert-weak-%s-%d", d.MAC, time.Now().UnixMilli()),
+					ID:       fireID,
 					Category: alerts.CatSignal, Urgent: false,
 					Severity: "warn", Title: "Weak signal on " + d.Name,
 					Description: fmt.Sprintf("%d dBm on %s - check coverage or move closer to an AP", *d.SignalDbm, routerName),
@@ -3479,8 +3490,38 @@ func (l *Live) buildOverview(ctx context.Context) (*Overview, error) {
 					Time:        "just now", RouterID: d.RouterID,
 				})
 			}
-			l.mu.Unlock()
+			if resolveID != "" {
+				// El episodio cerrado se conserva en el log con su ts de
+				// cierre (#1349); el evento ok referencia qué cierra y lleva
+				// el valor de recuperación y la duración del episodio. Si el
+				// usuario desestimó la alerta a mano antes, no se emite el
+				// cierre (su ID ya no está en el feed).
+				wasOpen := l.engine.Has(resolveID)
+				l.engine.Resolve(resolveID)
+				if wasOpen {
+					recSignal := ""
+					if d.SignalDbm != nil {
+						recSignal = strconv.Itoa(*d.SignalDbm)
+					}
+					durMin := int((weakNow - episodeStart) / 60000)
+					dur := "<1 min"
+					if durMin >= 1 {
+						dur = fmt.Sprintf("%d min", durMin)
+					}
+					l.engine.Emit(AlertEvent{
+						ID:       fmt.Sprintf("alert-weak-%s-ok-%d", d.MAC, weakNow),
+						Category: alerts.CatSignal, Urgent: false,
+						Severity: "ok", Title: "Weak signal resolved on " + d.Name,
+						Description: fmt.Sprintf("back to %s dBm on %s after %s", recSignal, routerName, dur),
+						Type:        alerts.TypeWifiWeakRecovered,
+						Vars:        map[string]string{"device": d.Name, "signal": recSignal, "router": routerName, "duration": dur},
+						Resolves:    []string{resolveID},
+						Time:        "just now", RouterID: d.RouterID,
+					})
+				}
+			}
 		}
+		l.mu.Unlock()
 	}
 	// #1292: lápidas filtradas de la lista final (una estación stale del AP
 	// re-emite la MAC en cada ciclo sin pasar por device_seen).

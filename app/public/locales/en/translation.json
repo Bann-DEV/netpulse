@@ -297,6 +297,10 @@
       "firmware-downgrade-target": {
         "title": "Firmware downgrade target",
         "description": "{{router}}: the configured target \"{{target}}\" is older than the installed firmware \"{{firmware}}\""
+      },
+      "wifi-weak-recovered": {
+        "title": "Weak signal resolved on {{device}}",
+        "description": "Back to {{signal}} dBm on {{router}} after {{duration}}"
       }
     },
     "viewDevice": "View device",
@@ -1457,7 +1461,11 @@
       "presenceRetentionNote": "Connect/disconnect and AP-roaming events older than this are pruned hourly. The 7-day client timeline only needs a week.",
       "roamCollect": "Roaming events ingest interval",
       "roamCollectSecs": "s",
-      "roamCollectNote": "How often the server reads the router logs (logread) for WiFi roaming events. Applied without restart."
+      "roamCollectNote": "How often the server reads the router logs (logread) for WiFi roaming events. Applied without restart.",
+      "weakHystLabel": "Weak signal hysteresis",
+      "weakHystCaption": "Margin above the threshold that counts as recovered signal",
+      "weakSamplesLabel": "Samples to close the alert",
+      "weakSamplesCaption": "Consecutive cycles with good signal required to resolve the alert automatically"
     },
     "demo": {
       "caption": "Explore NetPulse with a sample network without touching your routers",

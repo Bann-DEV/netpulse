@@ -151,6 +151,9 @@ const (
 	// and client device offline (opt-in, volatile).
 	TypeRouterOffline = "router-offline"
 	TypeDeviceOffline = "device-offline"
+	// #1452: cierre automático de la alerta de señal débil (episodio
+	// resuelto con valor de recuperación y duración).
+	TypeWifiWeakRecovered = "wifi-weak-recovered"
 )
 
 // Hints maps each alert-type slug to its actionable suggestion. Emitters copy

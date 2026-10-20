@@ -16,15 +16,19 @@ func (s *server) registerThresholdsRoutes(mux *http.ServeMux) {
 	kv := &dbKVAdapter{db: s.db.DB}
 	mux.Handle("GET /api/settings/thresholds", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"weakSignalDbm":      alerts.WeakSignalDbm(s.db.DB),
-			"alertRetentionDays": alerts.RetentionDays(s.db.DB),
+			"weakSignalDbm":            alerts.WeakSignalDbm(s.db.DB),
+			"weakSignalHysteresisDbm":  alerts.WeakSignalHysteresisDbm(s.db.DB),
+			"weakSignalResolveSamples": alerts.WeakSignalResolveSamples(s.db.DB),
+			"alertRetentionDays":       alerts.RetentionDays(s.db.DB),
 		})
 	})))
 
 	mux.Handle("PUT /api/settings/thresholds", auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			WeakSignalDbm      *int `json:"weakSignalDbm"`
-			AlertRetentionDays *int `json:"alertRetentionDays"`
+			WeakSignalDbm            *int `json:"weakSignalDbm"`
+			WeakSignalHysteresisDbm  *int `json:"weakSignalHysteresisDbm"`
+			WeakSignalResolveSamples *int `json:"weakSignalResolveSamples"`
+			AlertRetentionDays       *int `json:"alertRetentionDays"`
 		}
 		if st := readJSONBody(w, r, &body); st != 0 {
 			writeBodyError(w, st, "invalid_body", "body JSON inválido")
@@ -36,6 +40,28 @@ func (s *server) registerThresholdsRoutes(mux *http.ServeMux) {
 				return
 			}
 			if err := kv.Set(alerts.KeyWeakSignalDbm, strconv.Itoa(*body.WeakSignalDbm)); err != nil {
+				writeError(w, http.StatusInternalServerError, "kv_error", err.Error())
+				return
+			}
+		}
+		// #1452: margen de histéresis y muestras consecutivas de la
+		// auto-resolución de la alerta de señal débil.
+		if body.WeakSignalHysteresisDbm != nil {
+			if *body.WeakSignalHysteresisDbm < 1 || *body.WeakSignalHysteresisDbm > 10 {
+				writeError(w, http.StatusBadRequest, "invalid_value", "weakSignalHysteresisDbm debe estar entre 1 y 10")
+				return
+			}
+			if err := kv.Set(alerts.KeyWeakSignalHysteresisDbm, strconv.Itoa(*body.WeakSignalHysteresisDbm)); err != nil {
+				writeError(w, http.StatusInternalServerError, "kv_error", err.Error())
+				return
+			}
+		}
+		if body.WeakSignalResolveSamples != nil {
+			if *body.WeakSignalResolveSamples < 1 || *body.WeakSignalResolveSamples > 10 {
+				writeError(w, http.StatusBadRequest, "invalid_value", "weakSignalResolveSamples debe estar entre 1 y 10")
+				return
+			}
+			if err := kv.Set(alerts.KeyWeakSignalResolveSamples, strconv.Itoa(*body.WeakSignalResolveSamples)); err != nil {
 				writeError(w, http.StatusInternalServerError, "kv_error", err.Error())
 				return
 			}
@@ -54,8 +80,10 @@ func (s *server) registerThresholdsRoutes(mux *http.ServeMux) {
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"weakSignalDbm":      alerts.WeakSignalDbm(s.db.DB),
-			"alertRetentionDays": alerts.RetentionDays(s.db.DB),
+			"weakSignalDbm":            alerts.WeakSignalDbm(s.db.DB),
+			"weakSignalHysteresisDbm":  alerts.WeakSignalHysteresisDbm(s.db.DB),
+			"weakSignalResolveSamples": alerts.WeakSignalResolveSamples(s.db.DB),
+			"alertRetentionDays":       alerts.RetentionDays(s.db.DB),
 		})
 	})))
 }
