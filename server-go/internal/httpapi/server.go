@@ -418,6 +418,7 @@ func NewHandler(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/path/destinations", s.handlePathDestinations)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/topology", s.handleTopology)
+	s.registerWireGuardUrgentRoutes(mux)
 	mux.HandleFunc("GET /api/usteer", s.handleUsteer)
 	mux.HandleFunc("POST /api/usteer/{mac}/kick", s.handleUsteerKick)
 	s.registerReanchorRoutes(mux)

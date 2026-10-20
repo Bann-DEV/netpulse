@@ -195,7 +195,7 @@ func TestGetWireGuardStatsGLServerNames(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestGetWireGuardStatsUciDescWinsOverGL(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestGetWireGuardStatsSingleInterface(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestGetWireGuardStatsMultipleInterfaces(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -450,7 +450,7 @@ func TestGetWireGuardStatsNoInterfaces(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestGetWireGuardStatsExplicitFilter(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "wg1", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "wg1", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}
@@ -523,7 +523,7 @@ func TestGetWireGuardStatsOneInterfaceFails(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v (no debe abortar por una interfaz caída)", err)
 	}
@@ -545,7 +545,7 @@ func TestGetWireGuardStatsAllFail(t *testing.T) {
 		}
 		return "", fmt.Errorf("exit status 1")
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v (todas fallan → inactive sin error)", err)
 	}
@@ -576,7 +576,7 @@ func TestGetWireGuardStatsAmneziaWG(t *testing.T) {
 		}
 		return "", fmt.Errorf("comando inesperado: %s", cmd)
 	}}
-	stats, err := GetWireGuardStats(f, "host", "auto", "", nil)
+	stats, err := GetWireGuardStats(f, "host", "auto", "", nil, nil)
 	if err != nil {
 		t.Fatalf("GetWireGuardStats: %v", err)
 	}

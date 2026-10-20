@@ -5,6 +5,7 @@
 package adapters
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -290,13 +291,36 @@ func parseWGServerNames(gl string) map[string]string {
 	return out
 }
 
+// WGPeerKey devuelve el identificador ESTABLE y apto para URL de un peer
+// WireGuard (#1441): la clave pública en base64url sin padding (43 chars).
+// Es el único dato que identifica al peer entre sondeos y reinicios: WGPeer.ID
+// sale del device de NetPulse que casó por IP del túnel o, si no hay ninguno,
+// del índice del dump ("peer-3"), que cambia al reordenar los peers.
+// base64url porque una pubkey WireGuard lleva '+' y '/' (base64 estándar) y
+// esos caracteres rompen el path del endpoint de urgencia.
+func WGPeerKey(pubkey string) string {
+	pk := strings.TrimSpace(pubkey)
+	if pk == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(pk)
+	if err != nil {
+		// Pubkey no estándar (dump de AmneziaWG o firmware raro): se
+		// translitera a mano en vez de descartarla.
+		return strings.NewReplacer("+", "-", "/", "_", "=", "").Replace(pk)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
 // buildWGPeer convierte un peer del dump en un WGPeer, resolviendo el nombre
 // con la prioridad de siempre (nombre de device NetPulse → description UCI →
 // nombre del config wireguard_server (GL.iNet) → tunnelIP → "Peer <pubkey8>",
 // issues #659/#1433) y asignando el fallback de ID
 // "peer-<idx>" con un contador global (idx) para que los peers de varias
-// interfaces no colisionen (#713).
-func buildWGPeer(p WGDumpPeer, peerNames map[string]WGPeerName, descs map[string]string, nowSec int64, idx int) WGPeer {
+// interfaces no colisionen (#713). urgent (#1441): claves de peer marcadas
+// como importantes, por Key y, como cortesía, por ID (las llamadas antiguas y
+// los tests construyen WGPeer sin Key).
+func buildWGPeer(p WGDumpPeer, peerNames map[string]WGPeerName, descs map[string]string, nowSec int64, idx int, urgent map[string]bool) WGPeer {
 	tunnelIP := ""
 	if parts := strings.Split(p.AllowedIPs, ","); len(parts) > 0 {
 		tunnelIP = strings.Replace(parts[0], "/32", "", 1)
@@ -331,10 +355,12 @@ func buildWGPeer(p WGDumpPeer, peerNames map[string]WGPeerName, descs map[string
 	if p.HandshakeSec > 0 {
 		lastHandshake = relTime(p.HandshakeSec, nowSec)
 	}
+	key := WGPeerKey(p.Pubkey)
 	return WGPeer{
-		ID: id, Name: name, Type: typ, TunnelIP: tunnelIP,
+		ID: id, Key: key, Name: name, Type: typ, TunnelIP: tunnelIP,
 		Active: active, LastHandshake: lastHandshake,
 		Rx: fmtBytes(float64(p.RxBytes)), Tx: fmtBytes(float64(p.TxBytes)),
+		Urgent: urgent[key] || urgent[id],
 	}
 }
 
@@ -352,7 +378,11 @@ func buildWGPeer(p WGDumpPeer, peerNames map[string]WGPeerName, descs map[string
 // acumulan los peers de las que responden); si TODAS fallan se devuelve
 // Status "inactive" SIN error, para que pollWireGuard no loguee "no
 // disponible" en cada tick.
-func GetWireGuardStats(pool sshRunner, host, iface, subnet string, peerNames map[string]WGPeerName) (*WireGuardStats, error) {
+//
+// urgent (#1441): conjunto de claves de peer (WGPeer.Key) marcadas como
+// importantes por el admin; se estampa en cada WGPeer para que el mapa y las
+// alertas sepan a quién tratar distinto. nil = ninguno.
+func GetWireGuardStats(pool sshRunner, host, iface, subnet string, peerNames map[string]WGPeerName, urgent map[string]bool) (*WireGuardStats, error) {
 	ifaces := wgInterfaces(pool, host, iface)
 	stats := &WireGuardStats{
 		Interface: strings.Join(ifaces, ", "),
@@ -392,7 +422,7 @@ func GetWireGuardStats(pool sshRunner, host, iface, subnet string, peerNames map
 			descs[k] = v
 		}
 		for _, p := range ParseWGDump(dump) {
-			stats.Peers = append(stats.Peers, buildWGPeer(p, peerNames, descs, nowSec, idx))
+			stats.Peers = append(stats.Peers, buildWGPeer(p, peerNames, descs, nowSec, idx, urgent))
 			idx++
 		}
 	}

@@ -143,12 +143,16 @@ func canonAdguard() AdGuardStats {
 func canonWireguard() WireGuardStats {
 	return WireGuardStats{
 		Interface: "wg0", Subnet: "10.0.0.1/24", Status: "active",
+		// Key: identificador estable del peer (#1441). En el demo son ids sintéticos
+		// legibles para no parecer secretos ante el escáner (gitleaks).
+		// Urgent: el túnel site-to-site es el único que avisa si se cae; los
+		// portátiles y móviles son rutina (el resto, false).
 		Peers: []WGPeer{
-			{ID: "pixel-8-pro", Name: "Pixel 8 Pro", Type: "movil", TunnelIP: "10.0.0.2", Active: true, LastHandshake: "hace 38 s", Rx: "1,2 GB", Tx: "214 MB"},
-			{ID: "macbook-air", Name: "MacBook Air", Type: "portatil", TunnelIP: "10.0.0.3", Active: true, LastHandshake: "hace 1 min", Rx: "640 MB", Tx: "88 MB"},
-			{ID: "ipad-air", Name: "iPad Air", Type: "tablet", TunnelIP: "10.0.0.4", Active: false, LastHandshake: "hace 2 días", Rx: "3,1 GB", Tx: "402 MB"},
-			{ID: "portatil-trabajo", Name: "Portátil trabajo", Type: "portatil", TunnelIP: "10.0.0.5", Active: false, LastHandshake: "hace 6 h", Rx: "812 MB", Tx: "121 MB"},
-			{ID: "casa-familia", Name: "Casa familia", Type: "sitio", TunnelIP: "10.0.0.6", Active: false, LastHandshake: "hace 9 días", Rx: "12 GB", Tx: "4,2 GB"},
+			{ID: "pixel-8-pro", Key: "demo-pixel-8-pro", Name: "Pixel 8 Pro", Type: "movil", TunnelIP: "10.0.0.2", Active: true, LastHandshake: "hace 38 s", Rx: "1,2 GB", Tx: "214 MB"},
+			{ID: "macbook-air", Key: "demo-macbook-air", Name: "MacBook Air", Type: "portatil", TunnelIP: "10.0.0.3", Active: true, LastHandshake: "hace 1 min", Rx: "640 MB", Tx: "88 MB"},
+			{ID: "ipad-air", Key: "demo-ipad-air", Name: "iPad Air", Type: "tablet", TunnelIP: "10.0.0.4", Active: false, LastHandshake: "hace 2 días", Rx: "3,1 GB", Tx: "402 MB"},
+			{ID: "portatil-trabajo", Key: "demo-portatil-trabajo", Name: "Portátil trabajo", Type: "portatil", TunnelIP: "10.0.0.5", Active: false, LastHandshake: "hace 6 h", Rx: "812 MB", Tx: "121 MB"},
+			{ID: "casa-familia", Key: "demo-casa-familia", Name: "Casa familia", Type: "sitio", TunnelIP: "10.0.0.6", Active: false, LastHandshake: "hace 9 días", Rx: "12 GB", Tx: "4,2 GB", Urgent: true},
 		},
 	}
 }

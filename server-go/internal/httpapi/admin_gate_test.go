@@ -61,6 +61,8 @@ func TestRutasAdminDevuelven403ParaRolUser(t *testing.T) {
 		{"DELETE", "/api/config/routers/rt2"},
 		{"GET", "/api/config/sshkey"},
 		{"GET", "/api/config/discover"},
+		{"PUT", "/api/wireguard/peers/qooNaqES5pnpfSeBQ6WNQmMYVIyiTYqiY75NtQmhLJ8/urgent"},
+		{"GET", "/api/wireguard/urgent"},
 	}
 	for _, rt := range adminOnly {
 		if got := do(t, rt.method, ts.URL, rt.path, userCookie).StatusCode; got != 403 {

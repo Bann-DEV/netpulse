@@ -120,7 +120,12 @@ type AdGuardStats struct {
 
 // WGPeer es un peer WireGuard (bytes formateados ES: "1,2 GB").
 type WGPeer struct {
-	ID            string `json:"id"`
+	ID string `json:"id"`
+	// Key es el identificador ESTABLE del peer (#1441): la clave pública en
+	// base64url. ID no sirve para persistir nada (depende de los devices de
+	// NetPulse o del índice del dump) y la pubkey en base64 estándar lleva
+	// '+' y '/' y rompería la ruta del endpoint.
+	Key           string `json:"key"`
 	Name          string `json:"name"`
 	Type          string `json:"type"`
 	TunnelIP      string `json:"tunnelIp"`
@@ -128,6 +133,9 @@ type WGPeer struct {
 	LastHandshake string `json:"lastHandshake"`
 	Rx            string `json:"rx"`
 	Tx            string `json:"tx"`
+	// Urgent (#1441): el peer merece notificación cuando se cae (túnel
+	// site-to-site, servidor). Un portátil o un móvil que entra y sale no.
+	Urgent bool `json:"urgent"`
 }
 
 // WireGuardStats (quirk: Status siempre "active" si `wg show` respondió).

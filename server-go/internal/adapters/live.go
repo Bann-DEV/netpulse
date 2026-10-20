@@ -318,8 +318,12 @@ type Live struct {
 	engine        *alerts.Engine
 	wgActive      map[string]bool
 	wgActiveSince map[string]time.Time // when each active peer became active (disconnect duration)
-	weakAlerted   map[string]int64
-	onlineMacs    map[string]bool
+	// wgUrgent (#1441): claves de peer (WGPeer.Key) marcadas como urgentes:
+	// sus caídas avisan (Urgent=true en la alerta), las del resto solo van al
+	// log. Persistido en kv (wgUrgentKey).
+	wgUrgent    map[string]bool
+	weakAlerted map[string]int64
+	onlineMacs  map[string]bool
 	// unknownGrace: ticks consecutivos online+sin nombre (Name == MAC) por
 	// MAC. unknownAlerted: MACs que ya dispararon la alerta de desconocido
 	// (issue #248, persistido en kv: cada MAC alerta UNA sola vez).
@@ -480,6 +484,7 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		engine:               alerts.New(d, nil),
 		wgActive:             map[string]bool{},
 		wgActiveSince:        map[string]time.Time{},
+		wgUrgent:             map[string]bool{},
 		weakAlerted:          map[string]int64{},
 		onlineMacs:           map[string]bool{},
 		unknownGrace:         map[string]int{},
@@ -550,6 +555,8 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 			l.impostorEnabled = enRaw != "0"
 		}
 	}
+	// #1441: peers marcados como urgentes (persistidos en kv).
+	l.loadWGUrgent()
 	l.SetRouters(initial)
 	return l
 }
@@ -2560,7 +2567,12 @@ func (l *Live) pollWireGuard(devices []Device) *WireGuardStats {
 			peerNames[d.IP] = WGPeerName{ID: d.ID, Name: d.Name, Type: d.Type}
 		}
 	}
-	stats, err := GetWireGuardStats(l.pool, gw.SSHAddr(), l.cfg.WGInterface, "", peerNames)
+	// #1441: copia del conjunto de urgentes para estamparlo en cada peer sin
+	// tener el mutex tomado durante el sondeo SSH.
+	l.mu.Lock()
+	urgent := l.wgUrgentCopyLocked()
+	l.mu.Unlock()
+	stats, err := GetWireGuardStats(l.pool, gw.SSHAddr(), l.cfg.WGInterface, "", peerNames, urgent)
 	if err != nil {
 		log.Printf("[netpulse] WireGuard no disponible: %v", err)
 		return &WireGuardStats{Interface: l.cfg.WGInterface, Subnet: "", Status: "inactive", Peers: []WGPeer{}}
@@ -2575,6 +2587,11 @@ func (l *Live) pollWireGuard(devices []Device) *WireGuardStats {
 // peers whose active state changed since the last successful poll, and keeps
 // wgActive/wgActiveSince in sync. A peer that was never active cannot emit a
 // disconnect; the first post-boot cycle never emits a connect (warmup).
+//
+// #1441: la alerta de un peer URGENTE sale con Urgent=true (aviso push); la de
+// un peer normal con Urgent=false (solo queda en el log). La categoría y los
+// IDs no cambian: lo único que distingue a un site-to-site de un portátil es
+// el flag que puso el admin.
 func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 	activeNow := map[string]bool{}
 	for _, p := range stats.Peers {
@@ -2584,6 +2601,14 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Urgencia por peer: el flag viene estampado del sondeo (Urgent) y, por si
+	// el llamador construyó los WGPeer a mano, se cruza con el conjunto
+	// persistido por Key o por ID.
+	urgentNow := map[string]bool{}
+	for _, p := range stats.Peers {
+		urgentNow[p.ID] = p.Urgent || l.wgUrgent[p.Key] || l.wgUrgent[p.ID]
+	}
+
 	// Disconnects: previously active peers no longer present in activeNow.
 	for id := range l.wgActive {
 		if activeNow[id] {
@@ -2599,7 +2624,7 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 		l.engine.Emit(AlertEvent{
 			ID:          fmt.Sprintf("alert-wg-down-%s-%d", id, time.Now().UnixMilli()),
 			Category:    alerts.CatVPN,
-			Urgent:      false,
+			Urgent:      urgentNow[id],
 			Severity:    "info",
 			Title:       "WireGuard disconnect",
 			Description: fmt.Sprintf("%s disconnected after %s", name, dur),
@@ -2625,7 +2650,7 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 			l.engine.Emit(AlertEvent{
 				ID:          fmt.Sprintf("alert-wg-%s-%d", id, time.Now().UnixMilli()),
 				Category:    alerts.CatVPN,
-				Urgent:      false,
+				Urgent:      urgentNow[id],
 				Severity:    "info",
 				Title:       "WireGuard handshake",
 				Description: name + " connected",
