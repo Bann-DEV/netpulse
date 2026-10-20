@@ -192,6 +192,13 @@ export interface NetPulseApi extends NetPulseData {
   /** POST /api/alerts/impostor-approve (live): aprueba un BSSID como propio
    * (#1400); la alerta de impostor de ese BSSID se resuelve y no vuelve. */
   approveImpostorBssid: (bssid: string) => void
+  /**
+   * PUT /api/wireguard/peers/{key}/urgent (live): marca o desmarca un peer
+   * WireGuard como urgente (#1441), por su clave pública estable. Optimista
+   * con rollback: si el servidor rechaza, el flag vuelve a su valor previo.
+   * Demo: solo estado local, sin llamada de red.
+   */
+  setPeerUrgent: (key: string, urgent: boolean) => void
   /** POST /api/alerts/dismiss (live): limpia una alerta del feed (#833). Demo: estado local. Optimista. */
   dismissAlert: (id: string) => void
   /**
@@ -1063,6 +1070,37 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     })()
   }, [])
 
+  /** Marca/desmarca un peer WG como urgente (#1441). Optimista con rollback:
+   * un fallo de red deja el flag como estaba. La clave es la pública del peer
+   * (`key`), no su id, que cambia cuando el peer casa con otro equipo. */
+  const setPeerUrgent = useCallback((key: string, urgent: boolean) => {
+    const previous =
+      bundleRef.current.wireguard.peers.find((p) => p.key === key)?.urgent ?? false
+    const apply = (value: boolean) =>
+      setBundle((b) => ({
+        ...b,
+        wireguard: {
+          ...b.wireguard,
+          peers: b.wireguard.peers.map((p) => (p.key === key ? { ...p, urgent: value } : p)),
+        },
+      }))
+    apply(urgent)
+    if (modeRef.current !== 'live') return
+    void (async () => {
+      try {
+        const res = await fetch(`/api/wireguard/peers/${encodeURIComponent(key)}/urgent`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urgent }),
+        })
+        if (res.status === 401) redirectLogin()
+        if (!res.ok) apply(previous)
+      } catch {
+        apply(previous)
+      }
+    })()
+  }, [])
+
   /** Limpia una alerta del feed (issue #833): oculta la fila al instante y,
    * en live, la persiste como dismiss en el backend (no reaparece tras un
    * reinicio; si la condición se re-dispara, vuelve sola). */
@@ -1353,6 +1391,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       clearAllAlerts,
       silenceAlert,
       approveImpostorBssid,
+      setPeerUrgent,
       dismissAlert,
       rearmAgent,
       upgradeAgent,
@@ -1362,7 +1401,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       removeAgent,
       createAgentInstall,
     }),
-    [bundle, connectionStatus, agents, refreshAgents, isDemo, refresh, lastSnapshotAt, requestServerRefresh, getRouterDetail, getDevices, getAlerts, alertsConfig, setAlertConfig, markAlertsRead, markAllAlertsRead, clearAllAlerts, silenceAlert, approveImpostorBssid, dismissAlert, rearmAgent, upgradeAgent, upgradeAllAgents, reinstallAgent, uninstallAgent, removeAgent, createAgentInstall],
+    [bundle, connectionStatus, agents, refreshAgents, isDemo, refresh, lastSnapshotAt, requestServerRefresh, getRouterDetail, getDevices, getAlerts, alertsConfig, setAlertConfig, markAlertsRead, markAllAlertsRead, clearAllAlerts, silenceAlert, approveImpostorBssid, setPeerUrgent, dismissAlert, rearmAgent, upgradeAgent, upgradeAllAgents, reinstallAgent, uninstallAgent, removeAgent, createAgentInstall],
   )
 
   return <NetPulseContext.Provider value={value}>{children}</NetPulseContext.Provider>

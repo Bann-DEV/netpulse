@@ -172,10 +172,19 @@ export type DeviceInfra = 'hypervisor' | 'ct' | 'vm' | 'managed-switch' | 'ap'
 
 export interface WGPeer {
   id: string
+  /**
+   * Identificador estable del peer (#1441): su clave pública en base64url sin
+   * padding. `id` sale del equipo que casó por IP del túnel o de `peer-<idx>`,
+   * así que cambia con el tiempo y no sirve como clave de persistencia.
+   */
+  key: string
   name: string
   type: PeerType
   tunnelIp: string
   active: boolean
+  /** Marcado por el admin como urgente (#1441): sus caídas avisan y sus
+   *  slots van primero en el mapa. Persistido en el servidor por `key`. */
+  urgent: boolean
   lastHandshake: string
   rx: string
   tx: string

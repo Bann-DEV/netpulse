@@ -1249,9 +1249,14 @@
     "mapAria": "Network map: Internet connected to the Flint 2 Gateway, three access points (Living Room, Study and Patio) with their clients, and two active WireGuard tunnels.",
     "peerAria": "{{name}}, active WireGuard tunnel, {{ip}}",
     "peerAriaDown": "{{name}}, WireGuard tunnel down, {{ip}}",
+    "peerAriaUrgent": "{{name}}, active WireGuard tunnel, marked urgent, {{ip}}",
+    "peerAriaUrgentDown": "{{name}}, WireGuard tunnel down, marked urgent, {{ip}}",
     "peer": {
       "down": "Down",
-      "downHint": "No active tunnel: no recent handshake"
+      "downHint": "No active tunnel: no recent handshake",
+      "urgent": "Urgent",
+      "urgentHint": "Alerts when it drops and goes first on the map",
+      "urgentAria": "Toggle urgency for {{name}}"
     },
     "plan": "Plan",
     "received": "Received",
@@ -1305,8 +1310,11 @@
     },
     "peers": {
       "overflowTitle": "{{count}} more peers",
+      "overflowTitleUrgent": "{{count}} more peers · {{urgent}} urgent",
       "overflowAria": "{{count}} additional WireGuard peers",
-      "overflowAriaDown": "{{count}} additional WireGuard peers, {{down}} down"
+      "overflowAriaDown": "{{count}} additional WireGuard peers, {{down}} down",
+      "overflowAriaUrgent": "{{count}} additional WireGuard peers, {{urgent}} urgent",
+      "overflowAriaUrgentDown": "{{count}} additional WireGuard peers, {{urgent}} urgent and {{down}} down"
     },
     "ring": {
       "overflowAria": "{{count}} more clients on {{router}}",
