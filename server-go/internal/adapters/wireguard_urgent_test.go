@@ -150,8 +150,12 @@ func TestLoadWGUrgentIgnoresGarbage(t *testing.T) {
 func dropOnePeer(t *testing.T, peer WGPeer) AlertEvent {
 	t.Helper()
 	l, _ := newUrgentLive(t)
-	l.wgActive = map[string]bool{peer.ID: true}
-	l.wgActiveSince = map[string]time.Time{peer.ID: time.Now().Add(-2 * time.Hour)}
+	k := peer.Key
+	if k == "" {
+		k = peer.ID
+	}
+	l.wgActive = map[string]bool{k: true}
+	l.wgActiveSince = map[string]time.Time{k: time.Now().Add(-2 * time.Hour)}
 	l.applyWireGuardTransitions(&WireGuardStats{Peers: []WGPeer{peer}}, "gw")
 	for _, ev := range l.engine.List() {
 		if ev.Type == alerts.TypeWireguardDisconnect {
@@ -170,8 +174,8 @@ func TestWireGuardDisconnectUrgencyFollowsFlag(t *testing.T) {
 	if err := l.SetWireGuardPeerUrgent(urgent.Key, true); err != nil {
 		t.Fatalf("marcar urgente: %v", err)
 	}
-	l.wgActive = map[string]bool{urgent.ID: true}
-	l.wgActiveSince = map[string]time.Time{urgent.ID: time.Now().Add(-2 * time.Hour)}
+	l.wgActive = map[string]bool{urgent.Key: true}
+	l.wgActiveSince = map[string]time.Time{urgent.Key: time.Now().Add(-2 * time.Hour)}
 	l.applyWireGuardTransitions(&WireGuardStats{Peers: []WGPeer{urgent}}, "gw")
 
 	byPeer := map[string]AlertEvent{}
@@ -210,8 +214,9 @@ func TestWireGuardHandshakeUrgencyFollowsFlag(t *testing.T) {
 	if err := l.SetWireGuardPeerUrgent(urgentKey, true); err != nil {
 		t.Fatalf("marcar urgente: %v", err)
 	}
-	l.wgActive = map[string]bool{"otro": true}
-	l.wgActiveSince = map[string]time.Time{"otro": time.Now()}
+	l.wgActive = map[string]bool{WGPeerKey(realPubkey(22)): true}
+	l.wgActiveSince = map[string]time.Time{WGPeerKey(realPubkey(22)): time.Now()}
+	l.wgPrimed = true // estado post-warmup: el connect de site-a debe sonar
 	l.applyWireGuardTransitions(&WireGuardStats{Peers: []WGPeer{
 		{ID: "site-a", Key: urgentKey, Name: "Site A", Active: true},
 		{ID: "otro", Key: WGPeerKey(realPubkey(22)), Name: "Otro", Active: true},

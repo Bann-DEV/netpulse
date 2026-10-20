@@ -615,7 +615,7 @@ func TestDisabledUnitPaused(t *testing.T) {
 		offlineOpen:   map[string]bool{},
 		wanDown:       map[string]int{},
 		onlineMacs:    map[string]bool{},
-		weakStates:     map[string]alerts.WeakSignalState{},
+		weakStates:    map[string]alerts.WeakSignalState{},
 		backhaulCache: map[string]backhaulCacheEntry{},
 		lldpCache:     map[string]lldpCacheEntry{},
 	}
@@ -664,7 +664,7 @@ func TestLiveGetOverviewConcurrent(t *testing.T) {
 		failCount:     map[string]int{},
 		wanDown:       map[string]int{},
 		onlineMacs:    map[string]bool{},
-		weakStates:     map[string]alerts.WeakSignalState{},
+		weakStates:    map[string]alerts.WeakSignalState{},
 		backhaulCache: map[string]backhaulCacheEntry{},
 		lldpCache:     map[string]lldpCacheEntry{},
 	}
@@ -707,7 +707,7 @@ func TestLiveGetOverviewRecoversFromPanic(t *testing.T) {
 		failCount:     map[string]int{},
 		wanDown:       map[string]int{},
 		onlineMacs:    map[string]bool{},
-		weakStates:     map[string]alerts.WeakSignalState{},
+		weakStates:    map[string]alerts.WeakSignalState{},
 		backhaulCache: map[string]backhaulCacheEntry{},
 		lldpCache:     map[string]lldpCacheEntry{},
 	}

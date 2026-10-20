@@ -157,6 +157,7 @@ func TestWireGuardHandshakeStillEmitted(t *testing.T) {
 	l := wgAlertLive(t)
 	l.wgActive = map[string]bool{"peerB": true}
 	l.wgActiveSince = map[string]time.Time{"peerB": time.Now().Add(-5 * time.Minute)}
+	l.wgPrimed = true // estado post-warmup: el connect de peerA debe sonar
 
 	l.applyWireGuardTransitions(&WireGuardStats{Peers: []WGPeer{
 		{ID: "peerA", Name: "Alice", Active: true},

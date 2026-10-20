@@ -318,6 +318,12 @@ type Live struct {
 	engine        *alerts.Engine
 	wgActive      map[string]bool
 	wgActiveSince map[string]time.Time // when each active peer became active (disconnect duration)
+	// wgPrimed (#1443): la primera pasada tras el arranque NO emite connects
+	// (warmup: los peers activos al boot no son "conexiones"). Antes el
+	// warmup se deducía de len(wgActive)>0, que además tragaba la primera
+	// conexión real cuando el ciclo previo no tenía ningún peer activo
+	// (túnel iniciado por la unidad local tras estar caído).
+	wgPrimed bool
 	// wgUrgent (#1441): claves de peer (WGPeer.Key) marcadas como urgentes:
 	// sus caídas avisan (Urgent=true en la alerta), las del resto solo van al
 	// log. Persistido en kv (wgUrgentKey).
@@ -2591,15 +2597,35 @@ func (l *Live) pollWireGuard(devices []Device) *WireGuardStats {
 // wgActive/wgActiveSince in sync. A peer that was never active cannot emit a
 // disconnect; the first post-boot cycle never emits a connect (warmup).
 //
+// #1443: el tracker se indexa por Key (pubkey base64url estable, #1441) con
+// fallback a ID: WGPeer.ID puede cambiar entre sondeos ("peer-<idx>" según
+// la posición en el dump) y un cambio de identificador simulaba un
+// disconnect+connect fantasma. Los eventos de transición salen por
+// EmitNoDedup: cada uno es un incidente real (un connect y un disconnect
+// del mismo peer llevan el mismo título y el dedup de 5 min se comía los
+// flaps). El warmup es un flag propio (wgPrimed), no len(wgActive)>0: con
+// el guarda viejo, la primera conexión de un túnel iniciado por la unidad
+// local (ciclo previo con 0 peers activos) se perdía para siempre.
+//
 // #1441: la alerta de un peer URGENTE sale con Urgent=true (aviso push); la de
 // un peer normal con Urgent=false (solo queda en el log). La categoría y los
 // IDs no cambian: lo único que distingue a un site-to-site de un portátil es
 // el flag que puso el admin.
 func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
+	// wgTrackKey: identidad estable del peer para el tracker (#1443).
+	wgTrackKey := func(p WGPeer) string {
+		if p.Key != "" {
+			return p.Key
+		}
+		return p.ID
+	}
 	activeNow := map[string]bool{}
+	peerByKey := map[string]WGPeer{}
 	for _, p := range stats.Peers {
+		k := wgTrackKey(p)
+		peerByKey[k] = p
 		if p.Active {
-			activeNow[p.ID] = true
+			activeNow[k] = true
 		}
 	}
 	l.mu.Lock()
@@ -2608,8 +2634,8 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 	// el llamador construyó los WGPeer a mano, se cruza con el conjunto
 	// persistido por Key o por ID.
 	urgentNow := map[string]bool{}
-	for _, p := range stats.Peers {
-		urgentNow[p.ID] = p.Urgent || l.wgUrgent[p.Key] || l.wgUrgent[p.ID]
+	for k, p := range peerByKey {
+		urgentNow[k] = p.Urgent || l.wgUrgent[p.Key] || l.wgUrgent[p.ID]
 	}
 
 	// Disconnects: previously active peers no longer present in activeNow.
@@ -2618,13 +2644,11 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 			continue
 		}
 		name := id
-		for _, p := range stats.Peers {
-			if p.ID == id {
-				name = p.Name
-			}
+		if p, ok := peerByKey[id]; ok {
+			name = p.Name
 		}
 		dur := wgDuration(time.Since(l.wgActiveSince[id]))
-		l.engine.Emit(AlertEvent{
+		l.engine.EmitNoDedup(AlertEvent{
 			ID:          fmt.Sprintf("alert-wg-down-%s-%d", id, time.Now().UnixMilli()),
 			Category:    alerts.CatVPN,
 			Urgent:      urgentNow[id],
@@ -2638,19 +2662,19 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 		})
 		delete(l.wgActiveSince, id)
 	}
-	// Connects: newly active peers, skipping the first post-boot cycle.
+	// Connects: newly active peers, skipping the first post-boot cycle
+	// (warmup, wgPrimed) y sin dedup de 5 min: cada reconexión es un
+	// incidente propio que el operador espera ver (#1443).
 	for id := range activeNow {
 		if l.wgActive[id] {
 			continue
 		}
-		if len(l.wgActive) > 0 {
+		if l.wgPrimed {
 			name := id
-			for _, p := range stats.Peers {
-				if p.ID == id {
-					name = p.Name
-				}
+			if p, ok := peerByKey[id]; ok {
+				name = p.Name
 			}
-			l.engine.Emit(AlertEvent{
+			l.engine.EmitNoDedup(AlertEvent{
 				ID:          fmt.Sprintf("alert-wg-%s-%d", id, time.Now().UnixMilli()),
 				Category:    alerts.CatVPN,
 				Urgent:      urgentNow[id],
@@ -2666,6 +2690,7 @@ func (l *Live) applyWireGuardTransitions(stats *WireGuardStats, gwID string) {
 		l.wgActiveSince[id] = time.Now()
 	}
 	l.wgActive = activeNow
+	l.wgPrimed = true
 }
 
 // wgDuration humanizes a WireGuard session duration as "Xh Ym" (hours and
