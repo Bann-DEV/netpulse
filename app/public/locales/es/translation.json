@@ -301,6 +301,10 @@
       "wifi-weak-recovered": {
         "title": "Señal débil resuelta en {{device}}",
         "description": "De vuelta a {{signal}} dBm en {{router}} tras {{duration}}"
+      },
+      "firmware-target-unknown": {
+        "title": "Target de firmware no disponible",
+        "description": "{{router}}: el target configurado \"{{target}}\" no figura entre los releases publicados de OpenWrt (revisa el nombre en Actualizaciones de firmware)"
       }
     },
     "viewDevice": "Ver dispositivo",
@@ -2313,7 +2317,15 @@
     "owutInstallImage": "Instalar imagen descargada",
     "backupsTitle": "Copias de configuración en el servidor",
     "backupsEmpty": "Todavía no hay copias. Se sube una automáticamente antes de cada flasheo.",
-    "backupsDownload": "Descargar"
+    "backupsDownload": "Descargar",
+    "releasesTitle": "Chequeo de releases disponibles",
+    "releasesCaption": "NetPulse consulta periódicamente los releases publicados de OpenWrt para avisar solo cuando el target configurado existe de verdad.",
+    "releasesLast": "Último chequeo",
+    "releasesNever": "todavía sin éxito",
+    "releasesVersions": "{{count}} versiones publicadas",
+    "releasesCheckNow": "Comprobar ahora",
+    "releasesInterval": "Cada",
+    "releasesHours": "h"
   },
   "orchestration": {
     "title": "Orquestación",

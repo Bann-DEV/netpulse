@@ -126,6 +126,9 @@ type Deps struct {
 	ConfigBackup *configbackup.Store
 	// Firmware: targets y upgrades de firmware (#453).
 	Firmware *firmware.Store
+	// FirmwareReleases refresca la lista de releases publicados (#1444).
+	// nil → las rutas /api/firmware/releases responden 503 (demo).
+	FirmwareReleases *firmware.ReleasesRefresher
 	// FirmwareImage resuelve la imagen de un router desde el índice de
 	// descargas (downloads.openwrt.org). nil → se construye el por defecto.
 	FirmwareImage *firmware.ImageResolver
@@ -245,6 +248,8 @@ type server struct {
 
 	// Firmware: targets y upgrades de firmware (#453).
 	firmware *firmware.Store
+	// FirmwareReleases: daemon del chequeo periódico de releases (#1444).
+	fwReleases *firmware.ReleasesRefresher
 	// imageResolver resuelve la imagen de un router (downloads.openwrt.org).
 	imageResolver *firmware.ImageResolver
 	// FirmwareEngine: motor compartido de upgrades (manual + programados #494).
@@ -281,6 +286,7 @@ func NewHandler(d Deps) http.Handler {
 		firmware:        d.Firmware,
 		firmwareEngine:  firmware.NewEngine(d.Firmware, d.AgentHub),
 		imageResolver:   d.FirmwareImage,
+		fwReleases:      d.FirmwareReleases,
 		speedtest:       d.Speedtest,
 		alertEmitter:    d.AlertEmitter,
 		mqtt:            d.MQTT,
