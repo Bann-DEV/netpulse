@@ -5386,6 +5386,12 @@ export default function Settings() {
   const [refresh, setRefresh] = useStoredState<'3' | '5' | '10' | '0'>('netpulse-refresh', '3')
   const [signalT, setSignalTState] = useState(-70)
   const [latencyT, setLatencyT] = useStoredState('netpulse-th-latency', 50)
+  // #1452: margen de histéresis y muestras consecutivas de la
+  // auto-resolución de la alerta de señal débil. Mismo ámbito server-wide
+  // que el umbral (kv via /api/settings/thresholds); en demo degradan a
+  // localStorage como el umbral.
+  const [weakHystT, setWeakHystTState] = useState(3)
+  const [weakSamplesT, setWeakSamplesTState] = useState(3)
 
   // #904: el umbral de señal es server-wide (kv alerts.weak_signal_dbm):
   // alimenta la alerta "Señal débil" y es el mismo para todos los clientes.
@@ -5429,6 +5435,74 @@ export default function Settings() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weakSignalDbm: v }),
+      }).catch(() => {})
+    },
+    [isDemo],
+  )
+
+  useEffect(() => {
+    if (isDemo) {
+      try {
+        const h = localStorage.getItem('netpulse-th-weak-hyst')
+        const hn = h !== null ? (JSON.parse(h) as number) : 3
+        if (Number.isFinite(hn)) setWeakHystTState(hn)
+        const s = localStorage.getItem('netpulse-th-weak-samples')
+        const sn = s !== null ? (JSON.parse(s) as number) : 3
+        if (Number.isFinite(sn)) setWeakSamplesTState(sn)
+      } catch {
+        /* valor por defecto */
+      }
+      return
+    }
+    let cancelled = false
+    fetch('/api/settings/thresholds')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j) return
+        if (typeof j.weakSignalHysteresisDbm === 'number') setWeakHystTState(j.weakSignalHysteresisDbm)
+        if (typeof j.weakSignalResolveSamples === 'number') setWeakSamplesTState(j.weakSignalResolveSamples)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isDemo])
+
+  const setWeakHyst = useCallback(
+    (v: number) => {
+      setWeakHystTState(v)
+      if (isDemo) {
+        try {
+          localStorage.setItem('netpulse-th-weak-hyst', JSON.stringify(v))
+        } catch {
+          /* modo privado */
+        }
+        return
+      }
+      void fetch('/api/settings/thresholds', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weakSignalHysteresisDbm: v }),
+      }).catch(() => {})
+    },
+    [isDemo],
+  )
+
+  const setWeakSamples = useCallback(
+    (v: number) => {
+      setWeakSamplesTState(v)
+      if (isDemo) {
+        try {
+          localStorage.setItem('netpulse-th-weak-samples', JSON.stringify(v))
+        } catch {
+          /* modo privado */
+        }
+        return
+      }
+      void fetch('/api/settings/thresholds', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weakSignalResolveSamples: v }),
       }).catch(() => {})
     },
     [isDemo],
@@ -5705,6 +5779,28 @@ export default function Settings() {
                           ? t('settings.data.signalCaptionNone')
                           : t('settings.data.signalCaption', { count: weakCount }),
                       captionHot: weakCount > 0,
+                    },
+                    {
+                      key: 'weakHyst',
+                      label: t('settings.data.weakHystLabel'),
+                      value: weakHystT,
+                      set: setWeakHyst,
+                      min: 1,
+                      max: 10,
+                      format: (v: number) => `${v} dBm`,
+                      caption: t('settings.data.weakHystCaption'),
+                      captionHot: false,
+                    },
+                    {
+                      key: 'weakSamples',
+                      label: t('settings.data.weakSamplesLabel'),
+                      value: weakSamplesT,
+                      set: setWeakSamples,
+                      min: 1,
+                      max: 10,
+                      format: (v: number) => `${v}`,
+                      caption: t('settings.data.weakSamplesCaption'),
+                      captionHot: false,
                     },
                     {
                       key: 'latency',

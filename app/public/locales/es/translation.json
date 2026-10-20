@@ -297,6 +297,10 @@
       "firmware-downgrade-target": {
         "title": "Target de firmware inferior",
         "description": "{{router}}: el target configurado \"{{target}}\" es más viejo que el firmware instalado \"{{firmware}}\""
+      },
+      "wifi-weak-recovered": {
+        "title": "Señal débil resuelta en {{device}}",
+        "description": "De vuelta a {{signal}} dBm en {{router}} tras {{duration}}"
       }
     },
     "viewDevice": "Ver dispositivo",
@@ -1457,7 +1461,11 @@
       "presenceRetentionNote": "Los eventos de conexión/desconexión y roaming más antiguos se podan cada hora. El timeline de 7 días de cada cliente solo necesita una semana.",
       "roamCollect": "Intervalo de ingesta de eventos de itinerancia",
       "roamCollectSecs": "s",
-      "roamCollectNote": "Cada cuánto el servidor lee los logs de los routers (logread) para los eventos de itinerancia. Se aplica sin reiniciar."
+      "roamCollectNote": "Cada cuánto el servidor lee los logs de los routers (logread) para los eventos de itinerancia. Se aplica sin reiniciar.",
+      "weakHystLabel": "Histéresis de señal débil",
+      "weakHystCaption": "Margen por encima del umbral que cuenta como señal recuperada",
+      "weakSamplesLabel": "Muestras para cerrar la alerta",
+      "weakSamplesCaption": "Ciclos consecutivos con buena señal necesarios para resolver la alerta automáticamente"
     },
     "demo": {
       "caption": "Explora NetPulse con una red de ejemplo sin tocar tus routers",
