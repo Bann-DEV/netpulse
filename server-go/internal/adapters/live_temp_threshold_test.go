@@ -131,7 +131,7 @@ func TestComputeHealthUsesPerRouterTempThreshold(t *testing.T) {
 		{Name: "hot", Status: "online", Temp: iptr(72), TempThreshold: 70},
 		{Name: "cool", Status: "online", Temp: iptr(68), TempThreshold: 70},
 	}
-	h := computeHealth(routers, nil)
+	h := computeHealth(routers, nil, nil)
 	if h.Score != 92 {
 		t.Fatalf("score=%d, esperaba 92", h.Score)
 	}

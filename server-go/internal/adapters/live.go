@@ -3265,7 +3265,7 @@ func (l *Live) emitTempAlert(cfg RouterConfig, router Router) {
 }
 
 // computeHealth (index.js:462-486).
-func computeHealth(routers []Router, adguard *AdGuardStats) HealthScore {
+func computeHealth(routers []Router, adguard *AdGuardStats, wg *WireGuardStats) HealthScore {
 	score := 100
 	breakdown := []HealthDelta{}
 	wanScore := 100
@@ -3294,6 +3294,38 @@ func computeHealth(routers []Router, adguard *AdGuardStats) HealthScore {
 		score -= 5
 		svcScore -= 20
 		breakdown = append(breakdown, HealthDelta{Label: "AdGuard inactivo", Delta: -5})
+	}
+	// #1442: VPN en la nota de salud. "inactive" con interfaces descubiertas
+	// = túnel caído (quirk #714: sin interfaces WireGuard en el router el
+	// estado también es "inactive", pero Interface queda vacío y NO se
+	// penaliza: no hay nada que vigilar). Con la interfaz caída no se
+	// cuentan peers: están caídos por ella, no por sí mismos (no doble
+	// penalización). Cada peer importante (urgente, #1441) caído resta
+	// acotado para que uno solo no domine la nota.
+	if wg != nil && wg.Status != "active" && wg.Interface != "" {
+		score -= 10
+		svcScore -= 15
+		breakdown = append(breakdown, HealthDelta{Label: "WireGuard caído", Delta: -10})
+	} else if wg != nil {
+		urgentDown := []string{}
+		for _, p := range wg.Peers {
+			if p.Urgent && !p.Active {
+				urgentDown = append(urgentDown, p.Name)
+			}
+		}
+		if len(urgentDown) > 0 {
+			delta := 6 * len(urgentDown)
+			if delta > 12 {
+				delta = 12
+			}
+			score -= delta
+			svcScore -= delta + 3
+			if len(urgentDown) == 1 {
+				breakdown = append(breakdown, HealthDelta{Label: "peer WireGuard " + urgentDown[0] + " caído", Delta: -delta})
+			} else {
+				breakdown = append(breakdown, HealthDelta{Label: fmt.Sprintf("%d peers WireGuard importantes caídos", len(urgentDown)), Delta: -delta})
+			}
+		}
 	}
 	if score < 0 {
 		score = 0
@@ -3660,7 +3692,7 @@ func (l *Live) buildOverview(ctx context.Context) (*Overview, error) {
 	fillUplinkSpeeds(polled, distNodes, topo.Links)
 	fillWiredSpeeds(polled, distNodes, topo.Links) // #1384
 	return &Overview{
-		Health:  computeHealth(routerList, adguard),
+		Health:  computeHealth(routerList, adguard, wireguard),
 		WAN:     wan,
 		Traffic: TrafficByRange{H1: trafficOf("1h"), H24: trafficOf("24h"), D7: trafficOf("7d"), D30: trafficOf("30d")},
 		Adguard: ag, Wireguard: wgStats, Routers: routerList,
