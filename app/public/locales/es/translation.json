@@ -1249,9 +1249,14 @@
     "mapAria": "Mapa de la red: Internet conectado al Gateway Flint 2, tres puntos de acceso (Salón, Estudio y Patio) con sus clientes, y dos túneles WireGuard activos.",
     "peerAria": "{{name}}, túnel WireGuard activo, {{ip}}",
     "peerAriaDown": "{{name}}, túnel WireGuard caído, {{ip}}",
+    "peerAriaUrgent": "{{name}}, túnel WireGuard activo, marcado como urgente, {{ip}}",
+    "peerAriaUrgentDown": "{{name}}, túnel WireGuard caído, marcado como urgente, {{ip}}",
     "peer": {
       "down": "Caído",
-      "downHint": "Sin túnel activo: no hay handshake reciente"
+      "downHint": "Sin túnel activo: no hay handshake reciente",
+      "urgent": "Urgente",
+      "urgentHint": "Avisa si se cae y va primero en el mapa",
+      "urgentAria": "Alternar urgencia de {{name}}"
     },
     "plan": "Plan",
     "received": "Recibido",
@@ -1305,8 +1310,11 @@
     },
     "peers": {
       "overflowTitle": "{{count}} peers más",
+      "overflowTitleUrgent": "{{count}} peers más · {{urgent}} urgentes",
       "overflowAria": "{{count}} peers WireGuard adicionales",
-      "overflowAriaDown": "{{count}} peers WireGuard adicionales, {{down}} caídos"
+      "overflowAriaDown": "{{count}} peers WireGuard adicionales, {{down}} caídos",
+      "overflowAriaUrgent": "{{count}} peers WireGuard adicionales, {{urgent}} urgentes",
+      "overflowAriaUrgentDown": "{{count}} peers WireGuard adicionales, {{urgent}} urgentes y {{down}} caídos"
     },
     "ring": {
       "overflowAria": "{{count}} clientes más en {{router}}",

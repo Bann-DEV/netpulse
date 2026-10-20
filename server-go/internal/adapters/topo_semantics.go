@@ -737,17 +737,23 @@ func BuildTopoSemantics(routers []Router, devices []Device, wg WireGuardStats, d
 			wiredLink(dn.HostDeviceID, d)
 		}
 	}
-	// túneles WG: peers activos con coordenada canónica (máx 4)
+	// túneles WG: peers activos con coordenada canónica (máx 4). #1441: los
+	// urgentes primero, igual que el orden de slots del mapa (urgentes
+	// activos → activos → urgentes caídos → caídos): los 4 enlaces del
+	// servidor tienen que ser exactamente los 4 nodos que el front dibuja.
 	n := 0
-	for _, p := range wg.Peers {
-		if !p.Active {
-			continue
+	for pass := 0; pass < 2 && n < maxTopoPeerChips; pass++ {
+		wantUrgent := pass == 0
+		for _, p := range wg.Peers {
+			if !p.Active || p.Urgent != wantUrgent {
+				continue
+			}
+			if n >= maxTopoPeerChips {
+				break
+			}
+			sem.Links = append(sem.Links, TopoLink{From: "peer-" + p.ID, To: "internet", Kind: "wg"})
+			n++
 		}
-		if n >= maxTopoPeerChips {
-			break
-		}
-		sem.Links = append(sem.Links, TopoLink{From: "peer-" + p.ID, To: "internet", Kind: "wg"})
-		n++
 	}
 
 	// -- anillos por router --------------------------------------------------

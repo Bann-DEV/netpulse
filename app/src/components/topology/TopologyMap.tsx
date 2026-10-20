@@ -16,6 +16,8 @@ import { manufacturerLabel, relTime, roleLabel } from '@/i18n'
 import type { Device, DistributionNode, Router, WanInfo, WGPeer } from '@/data/mock'
 import { fmtEs } from '@/data/mock'
 import { StatusPill } from '@/components/StatusPill'
+import { Switch } from '@/components/ui/switch'
+import { useNetPulse } from '@/data/DataProvider'
 import { DEVICE_ICONS, deviceIcon } from '@/components/DeviceRow'
 import { fmtTemp, useTempUnit } from '@/lib/temperature'
 import { cn } from '@/lib/utils'
@@ -136,6 +138,31 @@ function MiniStat({ label, value, hot }: { label: string; value: string; hot?: b
   )
 }
 
+/** #1441: switch "Urgente" del peer dentro de la tarjeta del mapa. Lee el
+ * peer vivo del bundle (el tooltip guarda una copia) para que el estado se
+ * actualice al instante tras el cambio optimista. */
+function PeerUrgentToggle({ peer }: { peer: WGPeer }) {
+  const { t } = useTranslation()
+  const { wireguard, setPeerUrgent } = useNetPulse()
+  if (!peer.key) return null
+  const live = wireguard.peers.find((p) => p.key === peer.key) ?? peer
+  return (
+    <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-surface px-2.5 py-1.5">
+      <span className="min-w-0">
+        <span className="block text-caption font-semibold text-text-primary">{t('topology.peer.urgent')}</span>
+        <span className="block text-[10px] leading-tight text-text-muted">{t('topology.peer.urgentHint')}</span>
+      </span>
+      <Switch
+        checked={live.urgent}
+        onCheckedChange={(checked) => setPeerUrgent(live.key, checked)}
+        aria-label={t('topology.peer.urgentAria', { name: live.name })}
+        className="pointer-events-auto"
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
 function TooltipCard({
   tip,
   touch,
@@ -160,6 +187,14 @@ function TooltipCard({
 }) {
   const { t } = useTranslation()
   const [tempUnit] = useTempUnit()
+  const { wireguard } = useNetPulse()
+  // El tooltip guarda una copia del peer: para el flag urgente se lee el vivo.
+  const livePeer =
+    tip.kind === 'peer' ? wireguard.peers.find((p) => p.key === tip.peer.key) ?? tip.peer : null
+  const overflowUrgentCount =
+    tip.kind === 'peersOverflow'
+      ? tip.peers.filter((p) => (wireguard.peers.find((x) => x.key === p.key) ?? p).urgent).length
+      : 0
   return (
     <div
       className={cn(
@@ -219,11 +254,14 @@ function TooltipCard({
         <div>
           <div className="flex items-center justify-between gap-2">
             <span className="font-display text-sm font-semibold text-text-primary">{tip.peer.name}</span>
-            {tip.peer.active ? (
-              <StatusPill tone="tunnel" label={t('common.active')} pulse />
-            ) : (
-              <StatusPill tone="danger" label={t('topology.peer.down')} />
-            )}
+            <span className="flex items-center gap-1.5">
+              {livePeer?.urgent && <StatusPill tone="warn" label={t('topology.peer.urgent')} />}
+              {tip.peer.active ? (
+                <StatusPill tone="tunnel" label={t('common.active')} pulse />
+              ) : (
+                <StatusPill tone="danger" label={t('topology.peer.down')} />
+              )}
+            </span>
           </div>
           <div className="mt-0.5 font-mono text-caption text-text-muted">
             {tip.peer.tunnelIp} · wg0 · {t('topology.viaInternet')}
@@ -237,13 +275,16 @@ function TooltipCard({
             <MiniStat label={t('topology.received')} value={`↓ ${tip.peer.rx}`} />
             <MiniStat label={t('topology.sent')} value={`↑ ${tip.peer.tx}`} />
           </div>
+          <PeerUrgentToggle peer={tip.peer} />
         </div>
       )}
       {tip.kind === 'peersOverflow' && (
         <div>
           <div className="flex items-center justify-between gap-2">
             <span className="font-display text-sm font-semibold text-text-primary">
-              {t('topology.peers.overflowTitle', { count: tip.peers.length })}
+              {overflowUrgentCount > 0
+                ? t('topology.peers.overflowTitleUrgent', { count: tip.peers.length, urgent: overflowUrgentCount })
+                : t('topology.peers.overflowTitle', { count: tip.peers.length })}
             </span>
             {tip.peers.some((p) => p.active) ? (
               <StatusPill tone="tunnel" label={t('common.active')} pulse />
@@ -254,7 +295,14 @@ function TooltipCard({
           <div className="mt-2 space-y-1.5">
             {tip.peers.map((p) => (
               <div key={p.id} className="flex items-center justify-between gap-3 text-caption">
-                <span className="font-semibold text-text-primary">{p.name}</span>
+                <span className="flex min-w-0 items-center gap-1.5 font-semibold text-text-primary">
+                  {(wireguard.peers.find((x) => x.key === p.key) ?? p).urgent && (
+                    <span className="font-bold text-warn" aria-label={t('topology.peer.urgent')} title={t('topology.peer.urgent')}>
+                      !
+                    </span>
+                  )}
+                  <span className="truncate">{p.name}</span>
+                </span>
                 <span className="font-mono text-text-muted">
                   {p.active ? `Handshake ${relTime(p.lastHandshake)}` : t('topology.peer.down')}
                 </span>
@@ -539,6 +587,8 @@ export function TopologyMap({
   const { chips, ctsByHost, ctCountByHost, distNodes, hiddenPeers, hypervisorSourceByHost, internetNode, links, peerNodes, relatedTo, ringOverflowChips, routerNodes, wan } = model
   /** peers caídos dentro del chip "+N" (#1440): el chip lo dice en el aria-label */
   const hiddenDownCount = hiddenPeers.filter((p) => !p.active).length
+  /** peers urgentes dentro del chip "+N" (#1441): insignia "!" + aria-label */
+  const hiddenUrgentCount = hiddenPeers.filter((p) => p.urgent).length
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [initialView] = useState<View | null>(() => loadSavedView())
@@ -1303,8 +1353,12 @@ export function TopologyMap({
                   tabIndex={0}
                   aria-label={
                     down
-                      ? t('topology.peerAriaDown', { name: node.peer.name, ip: node.peer.tunnelIp })
-                      : t('topology.peerAria', { name: node.peer.name, ip: node.peer.tunnelIp })
+                      ? node.peer.urgent
+                        ? t('topology.peerAriaUrgentDown', { name: node.peer.name, ip: node.peer.tunnelIp })
+                        : t('topology.peerAriaDown', { name: node.peer.name, ip: node.peer.tunnelIp })
+                      : node.peer.urgent
+                        ? t('topology.peerAriaUrgent', { name: node.peer.name, ip: node.peer.tunnelIp })
+                        : t('topology.peerAria', { name: node.peer.name, ip: node.peer.tunnelIp })
                   }
                   animate={{ opacity: nodeOpacity(node.id) * (down ? 0.55 : 1) }}
                   transition={{ duration: 0.2 }}
@@ -1350,6 +1404,28 @@ export function TopologyMap({
                     strokeWidth={1.75}
                     aria-hidden
                   />
+                  {/* #1441: la urgencia NO se marca con color (el color ya dice
+                      activo/caído): anillo exterior + insignia "!" que también
+                      lee el aria-label del grupo. */}
+                  {node.peer.urgent && (
+                    <>
+                      <rect
+                        x={-22.5}
+                        y={-22.5}
+                        width={45}
+                        height={45}
+                        rx={14}
+                        fill="none"
+                        stroke={COLOR.warn}
+                        strokeWidth={1.5}
+                        aria-hidden
+                      />
+                      <circle cx={18.5} cy={-18.5} r={7.5} fill="rgb(var(--elevated))" stroke={COLOR.warn} strokeWidth={1.5} aria-hidden />
+                      <text x={18.5} y={-15.3} textAnchor="middle" fontSize={9.5} fontWeight={800} fill={COLOR.warn} aria-hidden>
+                        !
+                      </text>
+                    </>
+                  )}
                 </motion.g>
                 {/* Estado caído sin depender del color: texto + trazo discontinuo
                     (el aria-label del grupo ya lo dice para lectores de pantalla). */}
@@ -1386,9 +1462,13 @@ export function TopologyMap({
                 role="button"
                 tabIndex={0}
                 aria-label={
-                  hiddenDownCount > 0
-                    ? t('topology.peers.overflowAriaDown', { count: hiddenPeers.length, down: hiddenDownCount })
-                    : t('topology.peers.overflowAria', { count: hiddenPeers.length })
+                  hiddenUrgentCount > 0
+                    ? hiddenDownCount > 0
+                      ? t('topology.peers.overflowAriaUrgentDown', { count: hiddenPeers.length, urgent: hiddenUrgentCount, down: hiddenDownCount })
+                      : t('topology.peers.overflowAriaUrgent', { count: hiddenPeers.length, urgent: hiddenUrgentCount })
+                    : hiddenDownCount > 0
+                      ? t('topology.peers.overflowAriaDown', { count: hiddenPeers.length, down: hiddenDownCount })
+                      : t('topology.peers.overflowAria', { count: hiddenPeers.length })
                 }
                 onPointerEnter={(e) =>
                   handleNodeHover(
@@ -1447,6 +1527,16 @@ export function TopologyMap({
                 >
                   +{hiddenPeers.length}
                 </text>
+                {/* #1441: hay urgentes dentro del chip; la insignia "!" no
+                    depende del color y el tooltip dice cuántos. */}
+                {hiddenUrgentCount > 0 && (
+                  <>
+                    <circle cx={17} cy={-11} r={7.5} fill="rgb(var(--elevated))" stroke={COLOR.warn} strokeWidth={1.5} aria-hidden />
+                    <text x={17} y={-7.8} textAnchor="middle" fontSize={9.5} fontWeight={800} fill={COLOR.warn} aria-hidden>
+                      !
+                    </text>
+                  </>
+                )}
               </g>
             </motion.g>
           </g>

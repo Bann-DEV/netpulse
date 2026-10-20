@@ -2526,53 +2526,63 @@
     "peers": [
       {
         "id": "pixel-8-pro",
+        "key": "demo-pixel-8-pro",
         "name": "Pixel 8 Pro",
         "type": "movil",
         "tunnelIp": "10.0.0.2",
         "active": true,
         "lastHandshake": "hace 38 s",
         "rx": "1,2 GB",
-        "tx": "214 MB"
+        "tx": "214 MB",
+        "urgent": false
       },
       {
         "id": "macbook-air",
+        "key": "demo-macbook-air",
         "name": "MacBook Air",
         "type": "portatil",
         "tunnelIp": "10.0.0.3",
         "active": true,
         "lastHandshake": "hace 1 min",
         "rx": "640 MB",
-        "tx": "88 MB"
+        "tx": "88 MB",
+        "urgent": false
       },
       {
         "id": "ipad-air",
+        "key": "demo-ipad-air",
         "name": "iPad Air",
         "type": "tablet",
         "tunnelIp": "10.0.0.4",
         "active": false,
         "lastHandshake": "hace 2 días",
         "rx": "3,1 GB",
-        "tx": "402 MB"
+        "tx": "402 MB",
+        "urgent": false
       },
       {
         "id": "portatil-trabajo",
+        "key": "demo-portatil-trabajo",
         "name": "Portátil trabajo",
         "type": "portatil",
         "tunnelIp": "10.0.0.5",
         "active": false,
         "lastHandshake": "hace 6 h",
         "rx": "812 MB",
-        "tx": "121 MB"
+        "tx": "121 MB",
+        "urgent": false
       },
       {
         "id": "casa-familia",
+        "key": "demo-casa-familia",
         "name": "Casa familia",
         "type": "sitio",
         "tunnelIp": "10.0.0.6",
         "active": false,
         "lastHandshake": "hace 9 días",
         "rx": "12 GB",
-        "tx": "4,2 GB"
+        "tx": "4,2 GB",
+        "urgent": true
       }
     ]
   },

@@ -7,6 +7,7 @@ import { relTime } from '@/i18n'
 import type { PeerType, WGPeer } from '@/data/mock'
 import { useNetPulse } from '@/data/DataProvider'
 import { StatusPill } from '@/components/StatusPill'
+import { Switch } from '@/components/ui/switch'
 import { WG_TOTALS_30D, wgPeerExtras } from '@/components/routers/routerExtras'
 import { cn } from '@/lib/utils'
 
@@ -20,6 +21,7 @@ const PEER_ICONS: Record<PeerType, LucideIcon> = {
 
 function PeerRow({ peer, index }: { peer: WGPeer; index: number }) {
   const { t } = useTranslation()
+  const { setPeerUrgent } = useNetPulse()
   const [open, setOpen] = useState(false)
   const reduce = useReducedMotion()
   const Icon = PEER_ICONS[peer.type] ?? Smartphone
@@ -32,46 +34,63 @@ function PeerRow({ peer, index }: { peer: WGPeer; index: number }) {
       transition={{ duration: 0.3, ease: 'easeOut', delay: 0.1 + index * 0.07 }}
       className={cn(!peer.active && 'opacity-65')}
     >
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-hover"
-      >
-        {/* Avatar con inicial + icono de tipo superpuesto */}
-        <span className="relative shrink-0">
-          <span
-            className={cn(
-              'flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-bold',
-              peer.active ? 'bg-gradient-to-br from-tunnel to-accent text-canvas' : 'bg-elevated text-text-muted',
-            )}
-          >
-            {peer.name.charAt(0)}
-          </span>
-          <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-surface bg-elevated text-text-secondary">
-            <Icon className="h-2.5 w-2.5" strokeWidth={1.75} />
-          </span>
-        </span>
-
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-text-primary">{peer.name}</span>
-          <span className="flex items-center gap-1.5">
-            <span className="relative flex h-1.5 w-1.5">
-              {peer.active && (
-                <span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 animate-ping-soft" />
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-hover"
+        >
+          {/* Avatar con inicial + icono de tipo superpuesto */}
+          <span className="relative shrink-0">
+            <span
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-full font-display text-sm font-bold',
+                peer.active ? 'bg-gradient-to-br from-tunnel to-accent text-canvas' : 'bg-elevated text-text-muted',
               )}
-              <span className={cn('relative inline-flex h-1.5 w-1.5 rounded-full', peer.active ? 'bg-ok' : 'bg-text-muted')} />
+            >
+              {peer.name.charAt(0)}
             </span>
-            <span className="font-mono text-caption text-text-muted">
-              {peer.tunnelIp} · {relTime(peer.lastHandshake)}
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-surface bg-elevated text-text-secondary">
+              <Icon className="h-2.5 w-2.5" strokeWidth={1.75} />
+            </span>
+            {/* #1441: urgencia sin depender del color (glifo "!" + aria-label del switch) */}
+            {peer.urgent && (
+              <span
+                aria-hidden
+                className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-surface bg-surface text-[9px] font-bold text-warn"
+              >
+                !
+              </span>
+            )}
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-text-primary">{peer.name}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                {peer.active && (
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-ok opacity-75 animate-ping-soft" />
+                )}
+                <span className={cn('relative inline-flex h-1.5 w-1.5 rounded-full', peer.active ? 'bg-ok' : 'bg-text-muted')} />
+              </span>
+              <span className="font-mono text-caption text-text-muted">
+                {peer.tunnelIp} · {relTime(peer.lastHandshake)}
+              </span>
             </span>
           </span>
-        </span>
 
-        <span className="shrink-0 text-right font-mono text-caption text-text-secondary">
-          ↓ {peer.rx} ↑ {peer.tx}
-        </span>
-        <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', open && 'rotate-180')} strokeWidth={1.75} />
-      </button>
+          <span className="hidden shrink-0 text-right font-mono text-caption text-text-secondary sm:block">
+            ↓ {peer.rx} ↑ {peer.tx}
+          </span>
+          <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', open && 'rotate-180')} strokeWidth={1.75} />
+        </button>
+        <Switch
+          checked={peer.urgent}
+          onCheckedChange={(checked) => setPeerUrgent(peer.key, checked)}
+          aria-label={t('topology.peer.urgentAria', { name: peer.name })}
+          className="mr-1 shrink-0"
+        />
+      </div>
 
       <AnimatePresence initial={false}>
         {open && extra && (
@@ -105,7 +124,11 @@ function PeerRow({ peer, index }: { peer: WGPeer; index: number }) {
 export function WireGuardPanel() {
   const { t } = useTranslation()
   const { wireguard } = useNetPulse()
-  const peers = [...wireguard.peers].sort((a, b) => Number(b.active) - Number(a.active))
+  // #1441: activos primero y, dentro de cada grupo, los urgentes primero
+  // (mismo criterio que los slots del mapa).
+  const peers = [...wireguard.peers].sort(
+    (a, b) => Number(b.active) - Number(a.active) || Number(b.urgent) - Number(a.urgent),
+  )
   const connected = peers.filter((p) => p.active).length
 
   return (
@@ -143,7 +166,7 @@ export function WireGuardPanel() {
       {/* Lista de peers */}
       <div className="mt-3 divide-y divide-border/50">
         {peers.map((p, i) => (
-          <PeerRow key={p.id} peer={p} index={i} />
+          <PeerRow key={p.key || p.id} peer={p} index={i} />
         ))}
       </div>
     </section>

@@ -1318,14 +1318,15 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
   // -- peers WireGuard (arriba; túnel trazado vía Internet) -------------------
   // Hay 4 coordenadas canónicas. #1440: se dibujan TODOS los peers
   // configurados, no solo los activos: un túnel caído era invisible en el
-  // mapa. Orden: activos primero y caídos después, ambos en el orden del API.
-  // Así un peer caído nunca desplaza a un túnel vivo de su coordenada y los
-  // 4 slots visibles coinciden con los que el servidor manda como enlaces
-  // `wg` en la semántica (primeros 4 activos). Los caídos ocupan el mismo
-  // bloque, atenuados y sin enlace de túnel. Los que exceden van al chip "+N".
+  // mapa. #1441 añade la urgencia al orden de slots: urgentes activos →
+  // activos → urgentes caídos → caídos (el orden del API se respeta dentro de
+  // cada grupo). Un caído nunca desplaza a un activo de su coordenada, y los
+  // 4 primeros coinciden con los enlaces `wg` de la semántica del servidor,
+  // que aplica las mismas dos pasadas (urgentes activos primero). Los que
+  // exceden van al chip "+N".
   const activePeers = wireguard.peers.filter((p) => p.active)
-  const downPeers = wireguard.peers.filter((p) => !p.active)
-  const orderedPeers = [...activePeers, ...downPeers]
+  const peerRank = (p: WGPeer): number => (p.active ? 0 : 2) + (p.urgent ? 0 : 1)
+  const orderedPeers = [...wireguard.peers].sort((a, b) => peerRank(a) - peerRank(b))
   const peerNodes: PeerNode[] = orderedPeers.slice(0, PEER_COORDS.length).map((peer, i) => ({
     kind: 'peer',
     id: `peer-${peer.id}`,
