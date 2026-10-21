@@ -88,11 +88,28 @@ type AlertEvent struct {
 	// "Agent updated" resuelve "alert-agent-outdated-<id>"). La UI los
 	// muestra al expandir el evento de cierre.
 	Resolves []string `json:"resolves,omitempty"`
+	// Resolved (#1466): datos de los eventos que este evento cerró (título,
+	// ts de disparo, tipo y vars para traducir). El feed se pagina (20 por
+	// página): el evento resuelto puede NO estar en la página que el cliente
+	// tiene cargada, así que el payload va autocontenido y la UI no depende
+	// de buscarlo en su feed local.
+	Resolved []ResolvedEvent `json:"resolved,omitempty"`
 	// Volatile (#966): la alerta vive SOLO en memoria (no se persiste en
 	// alert_log ni sobrevive a reinicios) y desaparece del feed cuando su
 	// condicion se resuelve (engine.Remove). Uso: caida de agente, cuya
 	// semantica es "viva por router", no un historico de incidentes.
 	Volatile bool `json:"-"`
+}
+
+// ResolvedEvent (#1466): datos mínimos del evento que un cierre resolvió.
+// Type+Vars permiten traducir el título en el front; Title/Ts son el
+// fallback literal y el instante del disparo original.
+type ResolvedEvent struct {
+	ID    string            `json:"id"`
+	Title string            `json:"title,omitempty"`
+	Ts    int64             `json:"ts"`
+	Type  string            `json:"type,omitempty"`
+	Vars  map[string]string `json:"vars,omitempty"`
 }
 
 // Stable alert-type slugs (issue #310): keys of the Hints map.
@@ -115,14 +132,14 @@ const (
 	// de OpenWrt (chequeo periódico contra downloads.openwrt.org). Es un
 	// aviso de configuración, no una alerta de firmware desactualizado.
 	HintFirmwareUnknownTarget = "firmware-target-unknown"
-	HintWanDown           = "wan-down"
-	HintWifiWeak          = "wifi-weak"
-	HintGhostPort         = "ghost-port"
-	HintDegradedLink      = "degraded-link"
-	HintAgentOutdated     = "agent-outdated"
-	HintWanSlow           = "wan-slow"
-	HintUplinkSwitch      = "uplink-switched"
-	HintSnmpFailing       = "snmp-failing"
+	HintWanDown               = "wan-down"
+	HintWifiWeak              = "wifi-weak"
+	HintGhostPort             = "ghost-port"
+	HintDegradedLink          = "degraded-link"
+	HintAgentOutdated         = "agent-outdated"
+	HintWanSlow               = "wan-slow"
+	HintUplinkSwitch          = "uplink-switched"
+	HintSnmpFailing           = "snmp-failing"
 )
 
 // Additional stable alert-type slugs (issue #712): recovery/info/beacon/rearmer
@@ -349,7 +366,7 @@ func (e *Engine) loadPersistedLocked() {
 	}
 	rows, err := e.db.Query(
 		`SELECT id, ts, category, type, severity, urgent, title, description, hint,
-		        router_id, suppressed_by, vars, read_flag, resolved_ts
+		        router_id, suppressed_by, vars, read_flag, resolved_ts, resolves
 		 FROM alert_log ORDER BY ts DESC LIMIT ?`, MaxEvents)
 	if err != nil {
 		return
@@ -362,10 +379,10 @@ func (e *Engine) loadPersistedLocked() {
 	loaded := []row{}
 	for rows.Next() {
 		var ev AlertEvent
-		var typ, sev, hint, routerID, suppressedBy, varsRaw string
+		var typ, sev, hint, routerID, suppressedBy, varsRaw, resolvesRaw string
 		var urgent, read int
 		if err := rows.Scan(&ev.ID, &ev.Ts, &ev.Category, &typ, &sev, &urgent,
-			&ev.Title, &ev.Description, &hint, &routerID, &suppressedBy, &varsRaw, &read, &ev.ResolvedTs); err != nil {
+			&ev.Title, &ev.Description, &hint, &routerID, &suppressedBy, &varsRaw, &read, &ev.ResolvedTs, &resolvesRaw); err != nil {
 			return
 		}
 		// #833: una alerta limpiada no vuelve a aparecer tras un reinicio.
@@ -387,6 +404,13 @@ func (e *Engine) loadPersistedLocked() {
 			vars := map[string]string{}
 			if json.Unmarshal([]byte(varsRaw), &vars) == nil {
 				ev.Vars = vars
+			}
+		}
+		// #1466: referencias del cierre (qué eventos resolvió).
+		if resolvesRaw != "" {
+			var ids []string
+			if json.Unmarshal([]byte(resolvesRaw), &ids) == nil && len(ids) > 0 {
+				ev.Resolves = ids
 			}
 		}
 		loaded = append(loaded, row{ev: ev, read: read != 0})
@@ -556,20 +580,28 @@ func (e *Engine) persistLocked(ev AlertEvent) {
 			varsRaw = string(raw)
 		}
 	}
+	// #1466: las referencias del cierre se persisten; si no, tras un reinicio
+	// el evento de cierre queda sin saber qué resolvió.
+	resolvesRaw := ""
+	if len(ev.Resolves) > 0 {
+		if raw, err := json.Marshal(ev.Resolves); err == nil {
+			resolvesRaw = string(raw)
+		}
+	}
 	urgent := 0
 	if ev.Urgent {
 		urgent = 1
 	}
 	_, _ = e.db.Exec(
-		`INSERT INTO alert_log (id, ts, category, type, severity, urgent, title, description, hint, router_id, suppressed_by, vars, resolved_ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO alert_log (id, ts, category, type, severity, urgent, title, description, hint, router_id, suppressed_by, vars, resolved_ts, resolves)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET ts=excluded.ts, category=excluded.category,
 		   type=excluded.type, severity=excluded.severity, urgent=excluded.urgent,
 		   title=excluded.title, description=excluded.description, hint=excluded.hint,
 		   router_id=excluded.router_id, suppressed_by=excluded.suppressed_by, vars=excluded.vars,
-		   resolved_ts=excluded.resolved_ts`,
+		   resolved_ts=excluded.resolved_ts, resolves=excluded.resolves`,
 		ev.ID, ev.Ts, ev.Category, ev.Type, ev.Severity, urgent,
-		ev.Title, ev.Description, ev.Hint, ev.RouterID, ev.SuppressedBy, varsRaw, ev.ResolvedTs)
+		ev.Title, ev.Description, ev.Hint, ev.RouterID, ev.SuppressedBy, varsRaw, ev.ResolvedTs, resolvesRaw)
 	_, _ = e.db.Exec(
 		`DELETE FROM alert_log WHERE id NOT IN
 		   (SELECT id FROM alert_log ORDER BY ts DESC LIMIT ?)`, PersistMaxEvents)
@@ -810,6 +842,11 @@ func (e *Engine) List() []AlertEvent {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.pruneSilenceLocked()
+	// #1466: índice id → evento para resolver los cierres con datos propios.
+	byID := make(map[string]*AlertEvent, len(e.list))
+	for i := range e.list {
+		byID[e.list[i].ID] = &e.list[i]
+	}
 	out := make([]AlertEvent, 0, len(e.list))
 	for _, ev := range e.list {
 		if e.dismissed[ev.ID] {
@@ -820,6 +857,19 @@ func (e *Engine) List() []AlertEvent {
 			continue
 		}
 		ev.Read = e.readSet[ev.ID]
+		if len(ev.Resolves) > 0 {
+			ev.Resolved = make([]ResolvedEvent, 0, len(ev.Resolves))
+			for _, rid := range ev.Resolves {
+				ref := ResolvedEvent{ID: rid}
+				if orig, ok := byID[rid]; ok {
+					ref.Title = orig.Title
+					ref.Ts = orig.Ts
+					ref.Type = orig.Type
+					ref.Vars = orig.Vars
+				}
+				ev.Resolved = append(ev.Resolved, ref)
+			}
+		}
 		out = append(out, ev)
 	}
 	return out
