@@ -1257,26 +1257,52 @@ func BuildEthPorts(layout []PortLayout, states []PortState, brMembers map[string
 //
 // La boca conserva su sitio y su iface: las estadísticas y la MAC siguen
 // siendo las suyas, solo cambia cómo se presenta.
+//
+// #1482: cuando el layout YA trae una boca WAN pero el uplink runtime cae
+// en otra distinta, manda netifd: la boca del uplink se promueve y la del
+// layout vuelve a su netdev (ETH n). El layout es una descripción estática
+// del cableado de vendor; el uplink runtime es la verdad de terreno de por
+// dónde sale internet (caso real: board.json con wan en eth0 porque ahí
+// vive el management, y el PPPoE saliendo por eth2). Si la boca WAN del
+// layout no tiene un netdev físico al que volver (no consta, o se llama
+// literalmente "wan"), no se toca nada: antes mantener la presentación del
+// layout que duplicar el id "wan".
 func promoteUplink(ports []EthPort, netdev map[string]string, uplink string) []EthPort {
 	if uplink == "" {
 		return ports
-	}
-	for _, p := range ports {
-		if p.ID == "wan" {
-			return ports // el layout ya trae una boca WAN
-		}
 	}
 	// El uplink puede llegar etiquetado ("lan1.7"): la boca es la de debajo.
 	base := uplink
 	if i := strings.LastIndexByte(base, '.'); i > 0 {
 		base = base[:i]
 	}
+	wanIdx, upIdx := -1, -1
 	for i := range ports {
-		if n := netdev[ports[i].ID]; n == uplink || n == base {
-			ports[i].ID, ports[i].Label = "wan", "WAN"
-			break
+		if ports[i].ID == "wan" {
+			wanIdx = i
+		}
+		if upIdx < 0 {
+			if n := netdev[ports[i].ID]; n == uplink || n == base {
+				upIdx = i
+			}
 		}
 	}
+	if wanIdx < 0 {
+		// Ninguna boca salió como WAN en el layout: promueve la del uplink.
+		if upIdx >= 0 {
+			ports[upIdx].ID, ports[upIdx].Label = "wan", "WAN"
+		}
+		return ports
+	}
+	if upIdx < 0 || upIdx == wanIdx {
+		return ports // sin uplink, o de acuerdo con el layout
+	}
+	nd := netdev[ports[wanIdx].ID]
+	if nd == "" || nd == "wan" {
+		return ports // sin netdev físico al que volver: no duplicar la WAN
+	}
+	ports[wanIdx].ID, ports[wanIdx].Label = nd, portPrettyLabel(nd)
+	ports[upIdx].ID, ports[upIdx].Label = "wan", "WAN"
 	return ports
 }
 
