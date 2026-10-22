@@ -32,7 +32,10 @@ const (
 	// CmdTemp (#1484): temperatura de la CPU. En x86 la thermal_zone0 suele ser
 	// acpitz (ambiente ACPI), así que se elige por `type` con prioridad y la
 	// primera zona legible queda solo como fallback (ARM/SBC: cpu-thermal).
-	CmdTemp   = `o=""; for w in x86_pkg_temp cpu-thermal cpu_thermal soc-thermal; do for d in /sys/class/thermal/thermal_zone*; do [ "$(cat "$d/type" 2>/dev/null)" = "$w" ] && o=$(cat "$d/temp" 2>/dev/null) && break 2; done; done; [ -n "$o" ] || for f in /sys/class/thermal/thermal_zone*/temp; do [ -r "$f" ] && o=$(cat "$f") && break; done; printf '%s\n' "$o"`
+	// Último recurso (#1500): hwmon para equipos SIN thermal zones (Synology
+	// DSM: k10temp en /sys/class/hwmon, cero zones). Con zones presentes
+	// mandan las zones: una sola fuente por equipo (#1484).
+	CmdTemp   = `o=""; for w in x86_pkg_temp cpu-thermal cpu_thermal soc-thermal; do for d in /sys/class/thermal/thermal_zone*; do [ "$(cat "$d/type" 2>/dev/null)" = "$w" ] && o=$(cat "$d/temp" 2>/dev/null) && break 2; done; done; [ -n "$o" ] || for f in /sys/class/thermal/thermal_zone*/temp; do [ -r "$f" ] && o=$(cat "$f") && break; done; [ -n "$o" ] || for h in /sys/class/hwmon/hwmon*; do case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|k8temp|cpu_thermal|soc_thermal) [ -r "$h/temp1_input" ] && o=$(cat "$h/temp1_input") && break;; esac; done; printf '%s\n' "$o"`
 	CmdNetDev = "cat /proc/net/dev | tail -n +3"
 	// CmdPingWan: latencia + pérdida a internet (solo gateway). %s = target.
 	CmdPingWan = "ping -c 3 -W 2 %s 2>/dev/null | tail -2"
@@ -245,7 +248,11 @@ func CmdScanIface(iface string) string {
 type SysInfo struct {
 	Uptime float64   `json:"uptime"`
 	Load   []float64 `json:"load"`
-	Memory struct {
+	// Timezone (#1500): nombre IANA ("Asia/Shanghai") que el agente lee de
+	// /etc/localtime (o /etc/timezone, /etc/TZ). ubus nunca lo da, así que
+	// sin este campo la ficha mostraba "—" incluso en equipos con ubus.
+	Timezone string `json:"timezone,omitempty"`
+	Memory   struct {
 		Total     float64 `json:"total"`
 		Free      float64 `json:"free"`
 		Buffered  float64 `json:"buffered"`
@@ -1202,13 +1209,48 @@ func BuildEthPorts(layout []PortLayout, states []PortState, brMembers map[string
 			used[p.Name] = true
 		}
 		wanName := ""
-		if _, ok := byName["wan"]; ok {
-			wanName = "wan"
-		} else if _, ok := byName["pppoe-wan"]; ok {
-			wanName = "eth1"
-		} else if st, ok := byName["eth1"]; ok && !st.DSA {
-			// #847: un conduit DSA no es la WAN física aunque se llame eth1.
-			wanName = "eth1"
+		if uplink != "" {
+			// #1500: con uplink runtime la WAN es esa boca, no la heurística
+			// ciega de abajo (un AP bridge sin layout marcaba WAN en eth1
+			// teniendo el uplink en eth0). El uplink puede llegar etiquetado
+			// ("br0.1"): la boca es la de debajo.
+			base := uplink
+			if i := strings.LastIndexByte(base, '.'); i > 0 {
+				base = base[:i]
+			}
+			if st, ok := byName[base]; ok && phyRe.MatchString(base) && isEthNetdev(st, ok) && !conduits[base] {
+				wanName = base
+			} else if len(brMembers) > 0 {
+				// Uplink sobre bridge (APs: la ruta default vive en br0): la
+				// boca WAN es el miembro con vecino LLDP (la que mira al
+				// core) o, en su defecto, el de más rx bytes. Iteración
+				// ordenada: empates no deben bailar entre sondeos (#1500).
+				names := make([]string, 0, len(brMembers))
+				for m := range brMembers {
+					names = append(names, m)
+				}
+				sort.Strings(names)
+				bestRx := uint64(0)
+				for _, m := range names {
+					st, ok := byName[m]
+					if !ok || !st.Up || !phyRe.MatchString(m) || !isEthNetdev(st, ok) || conduits[m] {
+						continue
+					}
+					if wanName == "" || ifaces[m].Rx > bestRx {
+						wanName, bestRx = m, ifaces[m].Rx
+					}
+				}
+			}
+		}
+		if wanName == "" {
+			if _, ok := byName["wan"]; ok {
+				wanName = "wan"
+			} else if _, ok := byName["pppoe-wan"]; ok {
+				wanName = "eth1"
+			} else if st, ok := byName["eth1"]; ok && !st.DSA {
+				// #847: un conduit DSA no es la WAN física aunque se llame eth1.
+				wanName = "eth1"
+			}
 		}
 		if wanName != "" {
 			st := byName[wanName]

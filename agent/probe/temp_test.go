@@ -34,12 +34,56 @@ func fakeThermal(t *testing.T, zones map[string][2]string) string {
 
 func runCmdTemp(t *testing.T, root string) string {
 	t.Helper()
+	// Rutas con slashes: bajo sh de Git en Windows los backslashes del
+	// TempDir romperían los globs del comando (en Linux es no-op).
+	root = filepath.ToSlash(root)
 	cmd := strings.ReplaceAll(CmdTemp, "/sys/class/thermal", root)
+	// El fallback hwmon también se redirige: sin esto los tests leerían el
+	// hwmon REAL del host que corre el test (k10temp/coretemp en CI x86).
+	cmd = strings.ReplaceAll(cmd, "/sys/class/hwmon", root+"-hwmon")
 	out, err := exec.Command("sh", "-c", cmd).Output()
 	if err != nil {
 		t.Fatalf("CmdTemp: %v", err)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// fakeHwmon construye un /sys/class/hwmon de mentira bajo root+"-hwmon"
+// (el mismo sufijo que sustituye runCmdTemp).
+func fakeHwmon(t *testing.T, root, name, temp string) {
+	t.Helper()
+	dir := filepath.Join(root+"-hwmon", "hwmon0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "name"), []byte(name+"\n"), 0o644); err != nil {
+		t.Fatalf("name: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "temp1_input"), []byte(temp+"\n"), 0o644); err != nil {
+		t.Fatalf("temp1_input: %v", err)
+	}
+}
+
+// Sin thermal zones pero con hwmon de CPU (Synology DSM: k10temp, cero
+// zones): el fallback hwmon es la única fuente y debe ganar.
+func TestCmdTempHwmonSinZonas(t *testing.T) {
+	root := fakeThermal(t, nil)
+	fakeHwmon(t, root, "k10temp", "58000")
+	if got := runCmdTemp(t, root); got != "58000" {
+		t.Fatalf("temperatura %q, want 58000 (hwmon sin zones)", got)
+	}
+}
+
+// Con zones presentes mandan las zones: el hwmon no debe pisarlas aunque
+// exista (una sola fuente por equipo, criterio del maintainer en #1484).
+func TestCmdTempZonesGananSobreHwmon(t *testing.T) {
+	root := fakeThermal(t, map[string][2]string{
+		"thermal_zone0": {"x86_pkg_temp", "52000"},
+	})
+	fakeHwmon(t, root, "k10temp", "58000")
+	if got := runCmdTemp(t, root); got != "52000" {
+		t.Fatalf("temperatura %q, want 52000 (la zone gana al hwmon)", got)
+	}
 }
 
 // El caso del issue: x86 con acpitz en la zona 0 y x86_pkg_temp en la 2. Debe
