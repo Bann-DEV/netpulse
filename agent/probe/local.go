@@ -353,6 +353,20 @@ func (p *Prober) probeSystem(ctx context.Context) *SystemData {
 			any = true
 		}
 	}
+	// #1481: fallback portable de uptime sin ubus (Asuswrt, Linux genérico):
+	// el primer campo de /proc/uptime. Solo rellena el uptime; el resto de
+	// SysInfo sigue viniendo de ubus cuando existe.
+	if sd.SysInfo == nil || sd.SysInfo.Uptime == 0 {
+		if out := p.runBest(ctx, CmdProcUptime, 0); out != "" {
+			if sec := ParseUptimeSec(out); sec > 0 {
+				if sd.SysInfo == nil {
+					sd.SysInfo = &SysInfo{}
+				}
+				sd.SysInfo.Uptime = sec
+				any = true
+			}
+		}
+	}
 	if out := p.runBest(ctx, CmdUbusSystemBoard, 0); out != "" {
 		var b BoardInfo
 		if err := json.Unmarshal([]byte(out), &b); err == nil {
@@ -459,6 +473,24 @@ func (p *Prober) probeWireless(ctx context.Context, full bool) *WirelessData {
 		if out := p.runBest(ctx, CmdIwinfoAssoc, 8*time.Second); out != "" {
 			wd.Clients = ParseWirelessClients(out)
 			any = len(wd.Clients) > 0
+		}
+	}
+	// #1481: fallback nl80211 portable sin ubus hostapd ni iwinfo (Asuswrt
+	// con iw, Linux genérico): station dump por interfaz + radios por phy
+	// del mismo `iw dev`.
+	if !any {
+		if out := p.runBest(ctx, CmdIwStationDump, 8*time.Second); out != "" {
+			clients, radios := ParseIwWireless(out)
+			if len(clients) > 0 {
+				wd.Clients = clients
+				any = true
+			}
+			if len(radios) > 0 {
+				p.radiosMu.Lock()
+				p.radiosCache, p.radiosAt = radios, time.Now()
+				p.radiosMu.Unlock()
+				wd.Radios = radios
+			}
 		}
 	}
 
@@ -675,11 +707,19 @@ func (p *Prober) probeLldp(ctx context.Context) *LldpData {
 		return &LldpData{Available: false}
 	}
 	out := p.runBest(ctx, CmdLldpNeighbors, 5*time.Second)
-	if out == "" {
-		return &LldpData{Available: true}
-	}
 	neighbors, err := ParseLldpNeighbors([]byte(out))
+	if out != "" && err != nil {
+		// #1481: JSON no vacío pero inparseable (lldpd exótico): el mismo
+		// vecino en texto plano antes de declarar la ronda fallida. Con
+		// out=="" simplemente no hay vecinos: no se gasta un spawn en el
+		// texto (review de #1491, es el caso común de unidad sin vecinos).
+		if txt := p.runBest(ctx, CmdLldpNeighborsText, 5*time.Second); txt != "" {
+			neighbors, err = ParseLldpNeighborsText(txt), nil
+		}
+	}
 	if err != nil {
+		// JSON y texto fallaron esta ronda: Available con Neighbors nil
+		// (el server conserva el último dato bueno).
 		return &LldpData{Available: true}
 	}
 	d := &LldpData{Available: true, Neighbors: neighbors}

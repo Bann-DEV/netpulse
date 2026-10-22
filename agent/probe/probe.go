@@ -26,6 +26,9 @@ import (
 
 const (
 	CmdProcStat = "grep '^cpu ' /proc/stat"
+	// CmdProcUptime (#1481): fallback portable de uptime cuando no hay ubus
+	// (Asuswrt, Linux genérico). Primer campo = segundos desde boot.
+	CmdProcUptime = "cat /proc/uptime 2>/dev/null"
 	// CmdTemp (#1484): temperatura de la CPU. En x86 la thermal_zone0 suele ser
 	// acpitz (ambiente ACPI), así que se elige por `type` con prioridad y la
 	// primera zona legible queda solo como fallback (ARM/SBC: cpu-thermal).
@@ -457,6 +460,21 @@ func ParseProcStat(out string) (CPUSample, error) {
 	idleAll := get(3) + get(4)                            // idle + iowait
 	nonIdle := get(0) + get(1) + get(2) + get(5) + get(6) // user+nice+system+irq+softirq
 	return CPUSample{Total: idleAll + nonIdle, IdleAll: idleAll}, nil
+}
+
+// ParseUptimeSec (#1481): segundos desde boot del primer campo de
+// /proc/uptime ("70273.29 269277.55"). 0 si la salida no es parseable: el
+// caller lo trata como "sin dato" y conserva el camino ubus cuando existe.
+func ParseUptimeSec(out string) float64 {
+	fields := strings.Fields(strings.TrimSpace(out))
+	if len(fields) == 0 {
+		return 0
+	}
+	sec, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil || sec < 0 {
+		return 0
+	}
+	return sec
 }
 
 // CPUPercent: % de CPU por delta de muestras (nil si no hay delta válido:
