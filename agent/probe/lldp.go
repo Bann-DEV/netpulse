@@ -18,10 +18,19 @@ import (
 )
 
 // CmdLldpCheck: ¿está lldpcli instalado? (exit != 0 → no instalado).
-const CmdLldpCheck = "command -v lldpcli"
+// #1481: en Asuswrt el /bin/sh no trae el builtin `command`, así que la
+// forma clásica fallaba con lldpcli presente (y el payload salía con
+// lldpAvailable=false teniendo vecinos). Cadena de fallbacks portable:
+// builtin, which, y rutas absolutas típicas.
+const CmdLldpCheck = "command -v lldpcli 2>/dev/null || which lldpcli 2>/dev/null || ls /usr/sbin/lldpcli /usr/bin/lldpcli /opt/sbin/lldpcli 2>/dev/null | head -1"
 
 // CmdLldpNeighbors: vecinos LLDP en JSON (lldpd). Igual que la sonda SSH.
 const CmdLldpNeighbors = "lldpcli -f json show neighbors"
+
+// CmdLldpNeighborsText (#1481): vecinos en texto plano, fallback para
+// lldpd antiguos sin salida JSON. Mismos campos que el JSON (chassis id,
+// sysname, mgmt-ip, capabilities, port id/descr).
+const CmdLldpNeighborsText = "lldpcli show neighbors 2>/dev/null || /usr/sbin/lldpcli show neighbors 2>/dev/null || /opt/sbin/lldpcli show neighbors 2>/dev/null"
 
 // CmdLldpdIfaces: binding de lldpd en OpenWrt (UCI). Vacío si no hay UCI
 // (Linux genérico) o la opción no existe (lldpd escucha en todas las
@@ -231,4 +240,88 @@ func firstMgmtIP(raw json.RawMessage) string {
 		return single
 	}
 	return ""
+}
+
+// ParseLldpNeighborsText (#1481) parsea el formato texto de `lldpcli show
+// neighbors` (lldpd sin salida JSON): bloques separados por reglas que
+// empiezan en "Interface: <if>, via: ...", con campos ChassisID (mac o
+// local), SysName, SysDescr, MgmtIP, Capability "<tipo>, on|off" y PortID
+// (mac o local) / PortDescr. Mismo shape que el parser JSON: PortDesc cae
+// al valor del port id y Chassis al id del chasis si no hay SysName. Las
+// capacidades solo cuentan cuando van "on", igual que en JSON.
+func ParseLldpNeighborsText(out string) []LldpNeighbor {
+	neighbors := []LldpNeighbor{}
+	var cur *LldpNeighbor
+	var chassisID, portID string
+	flush := func() {
+		if cur == nil {
+			return
+		}
+		if cur.PortDesc == "" {
+			cur.PortDesc = portID
+		}
+		if cur.Chassis == "" {
+			cur.Chassis = chassisID
+		}
+		if cur.Port != "" || cur.ChassisMac != "" || cur.Chassis != "" {
+			neighbors = append(neighbors, *cur)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(out, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "Interface:") {
+			flush()
+			// "Interface:    eth0, via: LLDP, RID: 2, Time: ..."
+			name := strings.TrimPrefix(trim, "Interface:")
+			if i := strings.IndexByte(name, ','); i >= 0 {
+				name = name[:i]
+			}
+			cur = &LldpNeighbor{Port: strings.TrimSpace(name)}
+			chassisID, portID = "", ""
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		key, val := trim, ""
+		if i := strings.IndexByte(trim, ':'); i >= 0 {
+			key, val = trim[:i], strings.TrimSpace(trim[i+1:])
+		}
+		switch key {
+		case "ChassisID":
+			// "mac 08:bd:43:75:50:cd" | "local EVANGELION-X"
+			if rest, ok := strings.CutPrefix(val, "mac "); ok {
+				cur.ChassisMac = strings.ToUpper(strings.TrimSpace(rest))
+				chassisID = strings.TrimSpace(rest)
+			} else if rest, ok := strings.CutPrefix(val, "local "); ok {
+				chassisID = strings.TrimSpace(rest)
+			} else {
+				chassisID = val
+			}
+		case "SysName":
+			cur.Chassis = val
+		case "MgmtIP":
+			if cur.Mgmt == "" {
+				cur.Mgmt = val
+			}
+		case "Capability":
+			// "Bridge, on" | "Router, off"
+			if rest, ok := strings.CutSuffix(val, ", on"); ok && rest != "" {
+				cur.Caps = append(cur.Caps, strings.TrimSpace(rest))
+			}
+		case "PortID":
+			if rest, ok := strings.CutPrefix(val, "mac "); ok {
+				portID = strings.TrimSpace(rest)
+			} else if rest, ok := strings.CutPrefix(val, "local "); ok {
+				portID = strings.TrimSpace(rest)
+			} else {
+				portID = val
+			}
+		case "PortDescr":
+			cur.PortDesc = val
+		}
+	}
+	flush()
+	return neighbors
 }
