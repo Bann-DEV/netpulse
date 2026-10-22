@@ -367,6 +367,24 @@ func (p *Prober) probeSystem(ctx context.Context) *SystemData {
 			}
 		}
 	}
+	// #1500: memoria portable de /proc/meminfo cuando ubus no la dio (sin
+	// esto la ficha pinta RAM 0% en todo target sin ubus). Se rellenan los
+	// campos crudos y NUNCA Used: el server aplica su fórmula clásica
+	// (total-free-buffered-cached), la misma semántica que en unidades con
+	// ubus donde Used es la suma de RSS (#513).
+	if m := readMeminfoFieldsKB(); m.total > 0 {
+		if sd.SysInfo == nil {
+			sd.SysInfo = &SysInfo{}
+		}
+		if sd.SysInfo.Memory.Total == 0 {
+			sd.SysInfo.Memory.Total = float64(m.total) * 1024
+			sd.SysInfo.Memory.Free = float64(m.free) * 1024
+			sd.SysInfo.Memory.Buffered = float64(m.buffered) * 1024
+			sd.SysInfo.Memory.Cached = float64(m.cached) * 1024
+			sd.SysInfo.Memory.Available = float64(m.avail) * 1024
+			any = true
+		}
+	}
 	if out := p.runBest(ctx, CmdUbusSystemBoard, 0); out != "" {
 		var b BoardInfo
 		if err := json.Unmarshal([]byte(out), &b); err == nil {
