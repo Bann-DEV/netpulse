@@ -1467,8 +1467,10 @@ func TestBuildEthPortsMarcaLaBocaDelUplink(t *testing.T) {
 }
 
 func TestBuildEthPortsNoPisaUnaWanDelLayout(t *testing.T) {
-	// Router con boca WAN dedicada: el layout ya la trae y el uplink no
-	// debe promover ninguna otra.
+	// Guard del #1482: el layout trae una boca WAN cuyo netdev se llama
+	// literalmente "wan" (sin identidad física a la que volver), así que el
+	// uplink discrepante NO la pisa: mejor la presentación del layout que
+	// duplicar el id "wan".
 	layout := []PortLayout{
 		{ID: "wan", Name: "wan", Label: "WAN", Role: "wan"},
 		{ID: "lan1", Name: "lan1", Label: "LAN 1", Role: "lan"},
@@ -1477,6 +1479,36 @@ func TestBuildEthPortsNoPisaUnaWanDelLayout(t *testing.T) {
 	ports := BuildEthPorts(layout, states, nil, nil, "lan1")
 	if len(ports) != 2 || ports[0].ID != "wan" || ports[1].ID != "lan1" {
 		t.Fatalf("bocas: %+v", ports)
+	}
+}
+
+func TestBuildEthPortsElUplinkPisaLaWanDelLayout(t *testing.T) {
+	// #1482: board.json estático con la WAN en eth0 (management) mientras el
+	// PPPoE sale por eth2: manda el runtime. La boca del uplink pasa a WAN y
+	// la del layout vuelve a su netdev (ETH 0), sin moverse de su sitio.
+	layout := []PortLayout{
+		{ID: "wan", Name: "eth0", Label: "WAN", Role: "wan"},
+		{ID: "lan1", Name: "eth1", Label: "LAN 1", Role: "lan"},
+		{ID: "lan2", Name: "eth2", Label: "LAN 2", Role: "lan"},
+	}
+	states := ParsePortStates("eth0 up 1000 - 1 -\neth1 up 1000 - 1 -\neth2 up 2500 - 1 -\n")
+	ports := BuildEthPorts(layout, states, nil, nil, "eth2")
+	if len(ports) != 3 {
+		t.Fatalf("bocas: %+v", ports)
+	}
+	if ports[0].ID != "eth0" || ports[0].Label != "ETH 0" {
+		t.Fatalf("la WAN del layout debía volver a su netdev: %+v", ports[0])
+	}
+	if ports[1].ID != "lan1" {
+		t.Fatalf("el resto no se toca: %+v", ports[1])
+	}
+	if ports[2].ID != "wan" || ports[2].Label != "WAN" {
+		t.Fatalf("la boca del uplink debía salir como WAN: %+v", ports[2])
+	}
+	// De acuerdo con el layout: el uplink cae en la propia WAN y nada cambia.
+	ports = BuildEthPorts(layout, states, nil, nil, "eth0")
+	if ports[0].ID != "wan" || ports[0].Label != "WAN" || ports[2].ID != "lan2" {
+		t.Fatalf("uplink acorde al layout no debía tocar nada: %+v", ports)
 	}
 }
 
