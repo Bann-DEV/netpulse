@@ -147,9 +147,9 @@ func TestParseLldpNeighborsTextAsuswrt(t *testing.T) {
 	}
 }
 
-// TestProberFallbacksAsuswrt: sin ubus, sin iwinfo y sin JSON LLDP, el
-// prober completo levanta uptime, clientes/radios y vecinos por los
-// fallbacks portables del #1481.
+// TestProberFallbacksAsuswrt: sin ubus, sin iwinfo y con el JSON de lldpcli
+// roto, el prober completo levanta uptime, clientes/radios y vecinos por
+// los fallbacks portables del #1481.
 func TestProberFallbacksAsuswrt(t *testing.T) {
 	run := fakeRunner{outs: map[string]string{
 		CmdProcUptime:        uptimeProcFixture,
@@ -159,7 +159,7 @@ func TestProberFallbacksAsuswrt(t *testing.T) {
 		CmdPortStates:        "eth0 up 1000\neth1 up 1000\n",
 		CmdIwStationDump:     iwStationFixture,
 		CmdLldpCheck:         "/usr/sbin/lldpcli\n",
-		CmdLldpNeighbors:     "", // lldpd sin JSON o salida vacía
+		CmdLldpNeighbors:     "lldpcli: JSON output not supported\n", // no vacío, inparseable
 		CmdLldpNeighborsText: lldpTextFixture,
 	}}
 	p := NewProber(run, Options{GwPingTarget: "192.168.2.1", ScanInterval: ScanDisabled})
@@ -173,5 +173,23 @@ func TestProberFallbacksAsuswrt(t *testing.T) {
 	}
 	if pl.Data.Lldp == nil || !pl.Data.Lldp.Available || len(pl.Data.Lldp.Neighbors) != 2 {
 		t.Fatalf("lldp en texto no llegó: %+v", pl.Data.Lldp)
+	}
+}
+
+// TestProberLldpSinVecinosNoGastaTexto (review #1491): con el JSON vacío
+// (cero vecinos honestos) el texto NO se consulta aunque devolvería
+// vecinos: nada de spawns extra por ronda en unidades sin vecinos.
+func TestProberLldpSinVecinosNoGastaTexto(t *testing.T) {
+	run := fakeRunner{outs: map[string]string{
+		CmdProcStat:          "cpu  4705 356 584 3699 23 0 23 0 0 0\n",
+		CmdLldpCheck:         "/usr/sbin/lldpcli\n",
+		CmdLldpNeighbors:     "", // cero vecinos
+		CmdLldpNeighborsText: lldpTextFixture,
+	}}
+	p := NewProber(run, Options{GwPingTarget: "192.168.2.1", ScanInterval: ScanDisabled})
+
+	pl := p.Build(context.Background(), "lab", "3.0.19")
+	if pl.Data.Lldp == nil || !pl.Data.Lldp.Available || pl.Data.Lldp.Neighbors != nil {
+		t.Fatalf("JSON vacío debe dar Neighbors nil sin tocar el texto: %+v", pl.Data.Lldp)
 	}
 }

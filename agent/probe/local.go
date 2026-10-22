@@ -708,9 +708,11 @@ func (p *Prober) probeLldp(ctx context.Context) *LldpData {
 	}
 	out := p.runBest(ctx, CmdLldpNeighbors, 5*time.Second)
 	neighbors, err := ParseLldpNeighbors([]byte(out))
-	if out == "" || err != nil {
-		// #1481: lldpd sin salida JSON (o salida truncada): el mismo vecino
-		// en texto plano antes de declarar la ronda fallida.
+	if out != "" && err != nil {
+		// #1481: JSON no vacío pero inparseable (lldpd exótico): el mismo
+		// vecino en texto plano antes de declarar la ronda fallida. Con
+		// out=="" simplemente no hay vecinos: no se gasta un spawn en el
+		// texto (review de #1491, es el caso común de unidad sin vecinos).
 		if txt := p.runBest(ctx, CmdLldpNeighborsText, 5*time.Second); txt != "" {
 			neighbors, err = ParseLldpNeighborsText(txt), nil
 		}
