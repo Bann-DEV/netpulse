@@ -310,10 +310,15 @@ export default function RouterDetail() {
           ports={detail.extras.ethPorts}
           // #641/#661: los beacons RTLPlayground solo reportan tramas (fps),
           // pero un managed-switch sondeado por SNMP sí tiene contadores de
-          // bytes → se pinta en bps.
-          unit={router.type === 'managed-switch' || router.type === 'external'
-            ? (router.snmpEnabled ? 'bps' : 'fps')
-            : 'bps'}
+          // bytes → se pinta en bps. Las unidades con agente (external sin
+          // SNMP) TAMBIÉN llevan contadores de bytes: mismo criterio que
+          // FleetCard (vitalsAvailable === false identifica al beacon). El
+          // gráfico además se autocorrige desde los datos (#1502).
+          unit={router.snmpEnabled
+            ? 'bps'
+            : router.vitalsAvailable === false
+              ? 'fps'
+              : 'bps'}
           className="lg:col-span-12"
         />
       )}

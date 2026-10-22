@@ -199,16 +199,31 @@ export function PortSeriesChart({
     fetchData()
   }, [fetchData])
 
+  // #1502: la unidad la deciden los datos, no solo el tipo de la fuente: si
+  // la serie trae tasas de bytes se pinta bps (unidades con agente), si solo
+  // trae tramas, fps (beacons, #641); el prop queda como fallback para
+  // series vacías. Así un caller que clasifique mal no puede dejar el
+  // gráfico plano a cero teniendo contadores de bytes.
+  const effUnit: TrafficUnit = useMemo(
+    () =>
+      data.some((p) => p.rxBps > 0 || p.txBps > 0)
+        ? 'bps'
+        : data.some((p) => p.rxFps > 0 || p.txFps > 0)
+          ? 'fps'
+          : unit,
+    [data, unit],
+  )
+
   const chartData = useMemo(() => {
     const pts = data
       .map((p) => ({
         t: fmtTime(p.ts, range),
-        rx: unit === 'fps' ? p.rxFps : p.rxBps,
-        tx: unit === 'fps' ? p.txFps : p.txBps,
+        rx: effUnit === 'fps' ? p.rxFps : p.rxBps,
+        tx: effUnit === 'fps' ? p.txFps : p.txBps,
       }))
       .filter((p) => !Number.isNaN(p.rx) && !Number.isNaN(p.tx))
     return downscale(pts, 600)
-  }, [data, range, unit])
+  }, [data, range, effUnit])
 
   const hasData = chartData.length > 1
   const peakRx = hasData ? Math.max(...chartData.map((p) => p.rx)) : 0
@@ -326,7 +341,7 @@ export function PortSeriesChart({
         </span>
         {hasData && (
           <span className="font-mono text-[10px] text-text-muted">
-            ↓ {fmtRate(unit, peakRx)} · ↑ {fmtRate(unit, peakTx)}
+            ↓ {fmtRate(effUnit, peakRx)} · ↑ {fmtRate(effUnit, peakTx)}
           </span>
         )}
       </div>
@@ -351,7 +366,7 @@ export function PortSeriesChart({
               </defs>
               <CartesianGrid vertical={false} stroke="rgb(var(--border) / 0.5)" strokeDasharray="3 6" />
               <XAxis dataKey="t" hide />
-              <Tooltip content={<PortTooltip unit={unit} />} cursor={{ stroke: 'rgb(var(--border-strong))', strokeWidth: 1 }} />
+              <Tooltip content={<PortTooltip unit={effUnit} />} cursor={{ stroke: 'rgb(var(--border-strong))', strokeWidth: 1 }} />
               <Area
                 type="monotone"
                 dataKey="rx"
