@@ -32,7 +32,10 @@ const (
 	// CmdTemp (#1484): temperatura de la CPU. En x86 la thermal_zone0 suele ser
 	// acpitz (ambiente ACPI), así que se elige por `type` con prioridad y la
 	// primera zona legible queda solo como fallback (ARM/SBC: cpu-thermal).
-	CmdTemp   = `o=""; for w in x86_pkg_temp cpu-thermal cpu_thermal soc-thermal; do for d in /sys/class/thermal/thermal_zone*; do [ "$(cat "$d/type" 2>/dev/null)" = "$w" ] && o=$(cat "$d/temp" 2>/dev/null) && break 2; done; done; [ -n "$o" ] || for f in /sys/class/thermal/thermal_zone*/temp; do [ -r "$f" ] && o=$(cat "$f") && break; done; printf '%s\n' "$o"`
+	// Último recurso (#1500): hwmon para equipos SIN thermal zones (Synology
+	// DSM: k10temp en /sys/class/hwmon, cero zones). Con zones presentes
+	// mandan las zones: una sola fuente por equipo (#1484).
+	CmdTemp   = `o=""; for w in x86_pkg_temp cpu-thermal cpu_thermal soc-thermal; do for d in /sys/class/thermal/thermal_zone*; do [ "$(cat "$d/type" 2>/dev/null)" = "$w" ] && o=$(cat "$d/temp" 2>/dev/null) && break 2; done; done; [ -n "$o" ] || for f in /sys/class/thermal/thermal_zone*/temp; do [ -r "$f" ] && o=$(cat "$f") && break; done; [ -n "$o" ] || for h in /sys/class/hwmon/hwmon*; do case "$(cat "$h/name" 2>/dev/null)" in k10temp|coretemp|k8temp|cpu_thermal|soc_thermal) [ -r "$h/temp1_input" ] && o=$(cat "$h/temp1_input") && break;; esac; done; printf '%s\n' "$o"`
 	CmdNetDev = "cat /proc/net/dev | tail -n +3"
 	// CmdPingWan: latencia + pérdida a internet (solo gateway). %s = target.
 	CmdPingWan = "ping -c 3 -W 2 %s 2>/dev/null | tail -2"
