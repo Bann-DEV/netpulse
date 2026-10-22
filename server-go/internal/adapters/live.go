@@ -4376,9 +4376,22 @@ func (l *Live) attributedDevices() []Device {
 	// (que sobreescribe attachTo con ground truth del cluster).
 	detailNowMs := time.Now().UnixMilli()
 	detailMemo := l.updateFdbMemo(polled, detailNowMs)
+	// #1485 también en el detalle: sin la boca WAN, el bloque de ARP WAN-side
+	// no sella WanSide y /api/devices discrepa del overview (la ONT bridged
+	// vuelve como cliente cableado del gateway y el mapa pierde el chip del
+	// peer WAN). Misma resolución que en buildOverview.
+	detailWanPort := ""
+	l.mu.Lock()
+	gwCfg := l.gatewayCfg
+	l.mu.Unlock()
+	if gwCfg != nil {
+		if gp := polled[gwCfg.ID]; gp != nil {
+			detailWanPort = gp.wanInfo.Port
+		}
+	}
 	devices, _ := inferTopology(
 		overlayStickyFdb(polled, detailMemo, detailNowMs),
-		l.buildDevices(polled, ""),
+		l.buildDevices(polled, detailWanPort),
 	)
 	// #1292: lápidas fuera de la lista del detalle (la fuente viva puede
 	// seguir emitiendo la MAC borrada).
