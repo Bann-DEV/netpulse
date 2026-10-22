@@ -4068,6 +4068,9 @@ type liveExtras struct {
 	Soc                 string        `json:"soc"`
 	Flash               string        `json:"flash"`
 	RamMb               int           `json:"ramMb"`
+	// Timezone (#1500): nombre IANA del equipo; lo aporta el agente desde
+	// /etc/localtime (ubus nunca lo dio y ningún sondeo SSH/SNMP tampoco).
+	Timezone            string        `json:"timezone,omitempty"`
 	BandSplit           demoBandSplit `json:"bandSplit"`
 	TrafficNow          float64       `json:"trafficNow"`
 	GatewayLatencySpark []float64     `json:"gatewayLatencySpark"`
@@ -4245,6 +4248,9 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 		}
 		if p.sysInfo != nil && p.sysInfo.Memory.Total > 0 {
 			extras.RamMb = int(math.Round(p.sysInfo.Memory.Total / 1e6))
+		}
+		if p.sysInfo != nil && p.sysInfo.Timezone != "" {
+			extras.Timezone = p.sysInfo.Timezone
 		}
 		if p.net != nil {
 			extras.TrafficNow = mbps(p.net.RxBps)

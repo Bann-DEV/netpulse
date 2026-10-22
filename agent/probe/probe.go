@@ -245,6 +245,10 @@ func CmdScanIface(iface string) string {
 type SysInfo struct {
 	Uptime float64   `json:"uptime"`
 	Load   []float64 `json:"load"`
+	// Timezone (#1500): nombre IANA ("Asia/Shanghai") que el agente lee de
+	// /etc/localtime (o /etc/timezone, /etc/TZ). ubus nunca lo da, así que
+	// sin este campo la ficha mostraba "—" incluso en equipos con ubus.
+	Timezone string `json:"timezone,omitempty"`
 	Memory struct {
 		Total     float64 `json:"total"`
 		Free      float64 `json:"free"`

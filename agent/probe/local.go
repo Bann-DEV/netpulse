@@ -385,6 +385,16 @@ func (p *Prober) probeSystem(ctx context.Context) *SystemData {
 			any = true
 		}
 	}
+	// #1500: zona horaria portable (ubus no la da nunca; la ficha pintaba
+	// "—" incluso en equipos con ubus).
+	if tz := readTimezone(); tz != "" {
+		if sd.SysInfo == nil {
+			sd.SysInfo = &SysInfo{}
+		}
+		if sd.SysInfo.Timezone == "" {
+			sd.SysInfo.Timezone = tz
+		}
+	}
 	if out := p.runBest(ctx, CmdUbusSystemBoard, 0); out != "" {
 		var b BoardInfo
 		if err := json.Unmarshal([]byte(out), &b); err == nil {

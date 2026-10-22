@@ -25,3 +25,18 @@ Cached:         12582912 kB
 		t.Fatalf("basura debía dar 0, dio %+v", m)
 	}
 }
+
+func TestParseTimezoneLocaltime(t *testing.T) {
+	cases := map[string]string{
+		"/usr/share/zoneinfo/Asia/Shanghai":     "Asia/Shanghai",
+		"/rom/usr/share/zoneinfo/Asia/Shanghai": "Asia/Shanghai",
+		"/usr/share/zoneinfo/Europe/Madrid":     "Europe/Madrid",
+		"/etc/localtime":                        "",
+		"":                                      "",
+	}
+	for link, want := range cases {
+		if got := parseTimezoneLocaltime(link); got != want {
+			t.Fatalf("parseTimezoneLocaltime(%q) = %q, want %q", link, got, want)
+		}
+	}
+}

@@ -60,3 +60,34 @@ func readMeminfoFieldsKB() meminfoKB {
 	}
 	return parseMeminfoFieldsKB(string(data))
 }
+
+// parseTimezoneLocaltime convierte el destino del symlink /etc/localtime
+// (".../usr/share/zoneinfo/Asia/Shanghai") en el nombre IANA de la zona.
+func parseTimezoneLocaltime(link string) string {
+	const marker = "zoneinfo/"
+	i := strings.LastIndex(link, marker)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimSpace(link[i+len(marker):])
+}
+
+// readTimezone: nombre IANA de la zona horaria del equipo. ubus no la da
+// nunca, así que se lee del sistema: symlink /etc/localtime (OpenWrt,
+// Asuswrt, Merlin, DSM), luego /etc/timezone (Debian) y por último /etc/TZ
+// (forma POSIX "CST-8", menos bonita pero mejor que "—").
+func readTimezone() string {
+	if link, err := os.Readlink("/etc/localtime"); err == nil {
+		if tz := parseTimezoneLocaltime(link); tz != "" {
+			return tz
+		}
+	}
+	for _, f := range []string{"/etc/timezone", "/etc/TZ"} {
+		if b, err := os.ReadFile(f); err == nil {
+			if s := strings.TrimSpace(string(b)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
