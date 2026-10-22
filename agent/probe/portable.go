@@ -4,6 +4,7 @@ package probe
 
 import (
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -90,4 +91,84 @@ func readTimezone() string {
 		}
 	}
 	return ""
+}
+
+// parseDefaultRouteIface extrae la interfaz de la ruta default de
+// /proc/net/route (destino y máscara 00000000; métrica mínima gana).
+func parseDefaultRouteIface(data string) string {
+	best := ""
+	bestMetric := int64(-1)
+	for i, line := range strings.Split(data, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 8 || i == 0 && f[0] == "Iface" {
+			continue
+		}
+		if f[1] != "00000000" || f[7] != "00000000" {
+			continue
+		}
+		metric, _ := strconv.ParseInt(f[6], 10, 64)
+		if best == "" || metric < bestMetric {
+			best, bestMetric = f[0], metric
+		}
+	}
+	return best
+}
+
+// defaultRouteIface lee /proc/net/route del host; "" si no hay ruta default
+// o no se puede leer.
+func defaultRouteIface() string {
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	return parseDefaultRouteIface(string(data))
+}
+
+// isBridgeIface: ¿existe /sys/class/net/<name>/bridge? (es un bridge Linux).
+func isBridgeIface(name string) bool {
+	if name == "" {
+		return false
+	}
+	st, err := os.Stat("/sys/class/net/" + name + "/bridge")
+	return err == nil && st.IsDir()
+}
+
+// bridgeMemberUplink: boca miembro del bridge que hace de uplink en un AP
+// bridgeado. Criterio: primero el miembro con un vecino LLDP (la boca que
+// mira al core: switch/router aguas arriba); si ninguno anuncia LLDP, el
+// miembro con más bytes rx. El max-rx a secas se equivoca en APs donde un
+// puerto LAN carga tráfico local puenteado (wireless↔LAN) mayor que el del
+// uplink (medido en un GT-BE98 Pro: eth3 619 MB vs eth0 188 MB desde el
+// arranque). Iteración en orden de nombre: con empates de rx o varios
+// miembros LLDP la elección no debe bailar entre sondeos (review #1500).
+func bridgeMemberUplink(members map[string]bool, lldpPorts map[string]bool, states []PortState, ifaces map[string]IfRate) string {
+	byName := map[string]PortState{}
+	for _, st := range states {
+		byName[st.Name] = st
+	}
+	names := make([]string, 0, len(members))
+	for m := range members {
+		names = append(names, m)
+	}
+	sort.Strings(names)
+	qualifies := func(m string) bool {
+		st, ok := byName[m]
+		return ok && st.Up && !st.DSA && phyRe.MatchString(m) && !skipRe.MatchString(m)
+	}
+	for _, m := range names {
+		if qualifies(m) && lldpPorts[m] {
+			return m
+		}
+	}
+	best := ""
+	bestRx := uint64(0)
+	for _, m := range names {
+		if !qualifies(m) {
+			continue
+		}
+		if best == "" || ifaces[m].Rx > bestRx {
+			best, bestRx = m, ifaces[m].Rx
+		}
+	}
+	return best
 }

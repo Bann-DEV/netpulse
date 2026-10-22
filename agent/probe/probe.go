@@ -1206,13 +1206,48 @@ func BuildEthPorts(layout []PortLayout, states []PortState, brMembers map[string
 			used[p.Name] = true
 		}
 		wanName := ""
-		if _, ok := byName["wan"]; ok {
-			wanName = "wan"
-		} else if _, ok := byName["pppoe-wan"]; ok {
-			wanName = "eth1"
-		} else if st, ok := byName["eth1"]; ok && !st.DSA {
-			// #847: un conduit DSA no es la WAN física aunque se llame eth1.
-			wanName = "eth1"
+		if uplink != "" {
+			// #1500: con uplink runtime la WAN es esa boca, no la heurística
+			// ciega de abajo (un AP bridge sin layout marcaba WAN en eth1
+			// teniendo el uplink en eth0). El uplink puede llegar etiquetado
+			// ("br0.1"): la boca es la de debajo.
+			base := uplink
+			if i := strings.LastIndexByte(base, '.'); i > 0 {
+				base = base[:i]
+			}
+			if st, ok := byName[base]; ok && phyRe.MatchString(base) && isEthNetdev(st, ok) && !conduits[base] {
+				wanName = base
+			} else if len(brMembers) > 0 {
+				// Uplink sobre bridge (APs: la ruta default vive en br0): la
+				// boca WAN es el miembro con vecino LLDP (la que mira al
+				// core) o, en su defecto, el de más rx bytes. Iteración
+				// ordenada: empates no deben bailar entre sondeos (#1500).
+				names := make([]string, 0, len(brMembers))
+				for m := range brMembers {
+					names = append(names, m)
+				}
+				sort.Strings(names)
+				bestRx := uint64(0)
+				for _, m := range names {
+					st, ok := byName[m]
+					if !ok || !st.Up || !phyRe.MatchString(m) || !isEthNetdev(st, ok) || conduits[m] {
+						continue
+					}
+					if wanName == "" || ifaces[m].Rx > bestRx {
+						wanName, bestRx = m, ifaces[m].Rx
+					}
+				}
+			}
+		}
+		if wanName == "" {
+			if _, ok := byName["wan"]; ok {
+				wanName = "wan"
+			} else if _, ok := byName["pppoe-wan"]; ok {
+				wanName = "eth1"
+			} else if st, ok := byName["eth1"]; ok && !st.DSA {
+				// #847: un conduit DSA no es la WAN física aunque se llame eth1.
+				wanName = "eth1"
+			}
 		}
 		if wanName != "" {
 			st := byName[wanName]

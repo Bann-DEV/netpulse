@@ -289,14 +289,24 @@ func (p *Prober) Build(ctx context.Context, router, version string) *Payload {
 	pl.Data.System = p.probeSystem(ctx)
 	pl.Data.Wireless = p.probeWireless(ctx, true)
 	pl.Data.DHCP = p.probeDHCP(ctx)
-	pl.Data.FDB = p.probeFDB(ctx)
+	// LLDP antes que FDB (#1500): los puertos con vecino LLDP deciden qué
+	// miembro de un bridge es el uplink del AP. Una sola sonda por push:
+	// el resultado se reusa para el payload.
+	lldpData := p.probeLldp(ctx)
+	pl.Data.Lldp = lldpData
+	lldpPorts := map[string]bool{}
+	if lldpData != nil {
+		for _, nb := range lldpData.Neighbors {
+			if nb.Port != "" {
+				lldpPorts[nb.Port] = true
+			}
+		}
+	}
+	pl.Data.FDB = p.probeFDB(ctx, lldpPorts)
 	pl.Data.Arp, pl.Data.ArpStale, pl.Data.ArpDevs = p.probeArp(ctx)
 	pl.Data.Dawn = p.probeDawn(ctx)
 	pl.Data.Usteer = p.probeUsteer(ctx)
 	pl.Data.LuCI = p.probeLuCI(ctx)
-	// LLDP (#489): vecinos de lldpd en el payload del agente (antes solo
-	// llegaban por la sonda SSH del server, muerta para routers con agente).
-	pl.Data.Lldp = p.probeLldp(ctx)
 	// ClientBw (#551): tráfico por cliente desde nlbwmon (solo si instalado).
 	pl.Data.ClientBw = p.probeClientBw(ctx)
 	// Discovery (#338): mDNS services + randomized MAC detection.
@@ -670,7 +680,7 @@ func (p *Prober) probeWan(ctx context.Context) *WanInfo {
 }
 
 // probeFDB: MACs aprendidas (brctl) + puertos ethernet (layout + /sys).
-func (p *Prober) probeFDB(ctx context.Context) *FDBData {
+func (p *Prober) probeFDB(ctx context.Context, lldpPorts map[string]bool) *FDBData {
 	fd := &FDBData{}
 	any := false
 	if out := p.runBest(ctx, CmdBridgeFDB, 0); out != "" {
@@ -709,6 +719,18 @@ func (p *Prober) probeFDB(ctx context.Context) *FDBData {
 		uplink := ""
 		if p.lastWan != nil {
 			uplink = p.lastWan.Port
+		}
+		// #1500: sin ubus no hay WanInfo: el uplink sale de la ruta default
+		// de /proc/net/route. Si cae en un bridge (APs: la default vive en
+		// br0), la boca física es el miembro con un vecino LLDP (la que
+		// mira al core) o, en su defecto, el de más rx bytes.
+		if uplink == "" {
+			uplink = defaultRouteIface()
+		}
+		if uplink != "" && isBridgeIface(uplink) {
+			if m := bridgeMemberUplink(members, lldpPorts, states, ifaces); m != "" {
+				uplink = m
+			}
 		}
 		fd.Ports = BuildEthPorts(layout, states, members, ifaces, uplink)
 		any = true
