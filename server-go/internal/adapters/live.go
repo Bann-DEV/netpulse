@@ -4071,6 +4071,10 @@ type liveExtras struct {
 	// Timezone (#1500): nombre IANA del equipo; lo aporta el agente desde
 	// /etc/localtime (ubus nunca lo dio y ningún sondeo SSH/SNMP tampoco).
 	Timezone            string        `json:"timezone,omitempty"`
+	// UsedMb (#1501): RAM en uso en MiB con la misma fórmula del porcentaje
+	// (memUsedBytes); el front la pinta directamente en vez de derivarla de
+	// pct × total, que acumulaba el error de redondeo.
+	UsedMb              int           `json:"usedMb,omitempty"`
 	BandSplit           demoBandSplit `json:"bandSplit"`
 	TrafficNow          float64       `json:"trafficNow"`
 	GatewayLatencySpark []float64     `json:"gatewayLatencySpark"`
@@ -4247,7 +4251,12 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 			extras.LastReboot = fmt.Sprintf("%02d/%02d/%d, %02d:%02d", rb.Day(), int(rb.Month()), rb.Year(), rb.Hour(), rb.Minute())
 		}
 		if p.sysInfo != nil && p.sysInfo.Memory.Total > 0 {
-			extras.RamMb = int(math.Round(p.sysInfo.Memory.Total / 1e6))
+			// MiB, no MB SI: un módulo de 2 GiB debe leerse "2048 MB" en el
+			// panel, que es como el usuario lee el tamaño del chip (#1501;
+			// antes /1e6 daba 2097).
+			extras.RamMb = int(math.Round(p.sysInfo.Memory.Total / (1024 * 1024)))
+			m := p.sysInfo.Memory
+			extras.UsedMb = int(math.Round(memUsedBytes(m.Total, m.Free, m.Buffered, m.Cached, m.Available, m.Used) / (1024 * 1024)))
 		}
 		if p.sysInfo != nil && p.sysInfo.Timezone != "" {
 			extras.Timezone = p.sysInfo.Timezone

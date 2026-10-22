@@ -66,7 +66,7 @@ function PerfTooltip({
 /** ② Rendimiento (router-detail.md §②) — 3 áreas con crosshair sincronizado.
  * En live usa las series reales que sirve el backend (por router y rango);
  * en demo conserva la serie sintética canónica. */
-export function RouterPerformance({ router, liveSeries, totalRamMb }: { router: Router; liveSeries?: PerfSeriesLive; totalRamMb?: number }) {
+export function RouterPerformance({ router, liveSeries, totalRamMb, usedRamMb }: { router: Router; liveSeries?: PerfSeriesLive; totalRamMb?: number; usedRamMb?: number }) {
   const { t } = useTranslation()
   const { isDemo } = useNetPulse()
   const [tempUnit] = useTempUnit()
@@ -81,8 +81,8 @@ export function RouterPerformance({ router, liveSeries, totalRamMb }: { router: 
     return [{ t: '', cpu: router.cpu ?? 0, ram: router.ram ?? 0, temp: router.temp ?? 0 }]
   }, [isDemo, router, range, liveSeries])
   const captions = useMemo(
-    () => perfCaptions(router, data, isDemo ? undefined : totalRamMb, tempUnit),
-    [router, data, isDemo, totalRamMb, tempUnit],
+    () => perfCaptions(router, data, isDemo ? undefined : totalRamMb, isDemo ? undefined : usedRamMb, tempUnit),
+    [router, data, isDemo, totalRamMb, usedRamMb, tempUnit],
   )
 
   // #441: null cuando la fuente no reporta vitals (el panel no se monta,

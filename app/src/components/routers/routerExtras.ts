@@ -167,6 +167,8 @@ export interface RouterExtras {
   soc: string
   flash: string
   ramMb: number
+  /** RAM en uso en MiB según el backend (#1501); si falta, se deriva de pct. */
+  usedMb?: number
   bandSplit: BandSplit
   /** Zona horaria del router (p. ej. 'Europe/Madrid'); vacía si se desconoce. */
   timezone?: string
@@ -380,26 +382,27 @@ export function perfSeries(router: Router, range: '1h' | '24h' | '7d'): PerfPoin
   return points
 }
 
-export function perfCaptions(router: Router, data: PerfPoint[], totalMb?: number, unit: TempUnit = 'c'): { cpu: string; ram: string; temp: string } {
+export function perfCaptions(router: Router, data: PerfPoint[], totalMb?: number, usedMb?: number, unit: TempUnit = 'c'): { cpu: string; ram: string; temp: string } {
   // totalMb es la RAM total real (live, del backend). En demo (sin totalMb)
   // se usa el resolver demo, igual que antes.
   const total = totalMb && totalMb > 0 ? totalMb : getRouterExtras(router.id).ramMb
+  // #1501: el backend envía el uso autoritativo; derivarlo de pct × total
+  // acumulaba el error de redondeo del porcentaje.
+  const used = usedMb && usedMb > 0 ? usedMb : Math.round(((router.ram ?? 0) / 100) * total)
   if (data.length === 0) {
     const cpu = router.cpu ?? 0
     const temp = router.temp ?? 0
-    const ramUsed = Math.round(((router.ram ?? 0) / 100) * total)
     return {
       cpu: i18n.t('routerDetail.perf.peakCpu', { pct: cpu, t: '—' }),
-      ram: i18n.t('routerDetail.perf.ramUsed', { used: ramUsed, total }),
+      ram: i18n.t('routerDetail.perf.ramUsed', { used, total }),
       temp: i18n.t('routerDetail.perf.maxTemp', { temp: fmtTemp(temp, unit) }),
     }
   }
   const cpuMax = data.reduce((m, p) => (p.cpu > m.cpu ? p : m), data[0]!)
   const tempMax = data.reduce((m, p) => (p.temp > m.temp ? p : m), data[0]!)
-  const ramUsed = Math.round(((router.ram ?? 0) / 100) * total)
   return {
     cpu: i18n.t('routerDetail.perf.peakCpu', { pct: cpuMax.cpu, t: cpuMax.t }),
-    ram: i18n.t('routerDetail.perf.ramUsed', { used: ramUsed, total }),
+    ram: i18n.t('routerDetail.perf.ramUsed', { used, total }),
     temp: i18n.t('routerDetail.perf.maxTemp', { temp: fmtTemp(tempMax.temp, unit) }),
   }
 }

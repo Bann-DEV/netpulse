@@ -36,3 +36,32 @@ func memUsagePct(total, free, buffered, cached, available, usedProc float64) int
 	}
 	return int(math.Round(used / total * 100))
 }
+
+// memUsedBytes: mismos criterios que memUsagePct pero en bytes, para que el
+// server envíe la cifra de uso autoritativa (#1501): derivarla en el front
+// desde el porcentaje redondeado (pct × total) acumula hasta ~2% de error
+// visible en el texto "X MB used of Y MB".
+func memUsedBytes(total, free, buffered, cached, available, usedProc float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	if usedProc > 0 && usedProc < total {
+		return usedProc
+	}
+	if cached > 0 {
+		used := total - free - buffered - cached
+		if used < 0 {
+			used = 0
+		}
+		return used
+	}
+	avail := available
+	if avail == 0 {
+		avail = free + buffered
+	}
+	used := total - avail
+	if used < 0 {
+		used = 0
+	}
+	return used
+}
