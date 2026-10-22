@@ -252,7 +252,7 @@ type SysInfo struct {
 	// /etc/localtime (o /etc/timezone, /etc/TZ). ubus nunca lo da, así que
 	// sin este campo la ficha mostraba "—" incluso en equipos con ubus.
 	Timezone string `json:"timezone,omitempty"`
-	Memory struct {
+	Memory   struct {
 		Total     float64 `json:"total"`
 		Free      float64 `json:"free"`
 		Buffered  float64 `json:"buffered"`

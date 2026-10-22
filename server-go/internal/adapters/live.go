@@ -4060,17 +4060,17 @@ func countClientsPerRouter(routers []Router, devices []Device) {
 
 // liveExtras es el objeto extras del detalle live (index.js:677-700).
 type liveExtras struct {
-	MAC                 string        `json:"mac"`
-	Firmware            string        `json:"firmware"`
-	FirmwareUpdated     bool          `json:"firmwareUpdated"`
-	FirmwareAvailable   string        `json:"firmwareAvailable,omitempty"`
-	LastReboot          string        `json:"lastReboot"`
-	Soc                 string        `json:"soc"`
-	Flash               string        `json:"flash"`
-	RamMb               int           `json:"ramMb"`
+	MAC               string `json:"mac"`
+	Firmware          string `json:"firmware"`
+	FirmwareUpdated   bool   `json:"firmwareUpdated"`
+	FirmwareAvailable string `json:"firmwareAvailable,omitempty"`
+	LastReboot        string `json:"lastReboot"`
+	Soc               string `json:"soc"`
+	Flash             string `json:"flash"`
+	RamMb             int    `json:"ramMb"`
 	// Timezone (#1500): nombre IANA del equipo; lo aporta el agente desde
 	// /etc/localtime (ubus nunca lo dio y ningún sondeo SSH/SNMP tampoco).
-	Timezone            string        `json:"timezone,omitempty"`
+	Timezone string `json:"timezone,omitempty"`
 	// UsedMb (#1501): RAM en uso en MiB con la misma fórmula del porcentaje
 	// (memUsedBytes); el front la pinta directamente en vez de derivarla de
 	// pct × total, que acumulaba el error de redondeo.
