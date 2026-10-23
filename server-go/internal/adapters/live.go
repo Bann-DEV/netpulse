@@ -101,7 +101,11 @@ type routerPolled struct {
 	// #1256: SNMP rellena sysDescr (nombre/modelo completo del switch) y,
 	// en MikroTik SwOS, la temperatura del chasis (hasTemp). hasTemp
 	// distingue "no aplica" de "0 °C" para no pisar el null de #441.
-	hasTemp  bool
+	hasTemp bool
+	// hasCpu: mismo contrato que hasTemp para la CPU de los switches SNMP
+	// (tabla de procesos Netgear FastPath): sin bandera, el null de #441
+	// pisaría la lectura real.
+	hasCpu   bool
 	sysDescr string
 	// sysName (#1256): hostname que el usuario define en el equipo; para
 	// SNMP alimenta el Name visible de la unidad en flota.
@@ -1553,6 +1557,11 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 		// no la pisamos con null: se conserva la vital junto a las demás.
 		if p.hasTemp {
 			r.Temp = iptr(p.temp)
+		}
+		// Netgear FastPath: misma canalía para la CPU leída de la tabla de
+		// procesos del agente privado.
+		if p.hasCpu {
+			r.CPU = iptr(p.cpu)
 		}
 	}
 	r.SnmpEnabled = p.cfg.SnmpEnabled
