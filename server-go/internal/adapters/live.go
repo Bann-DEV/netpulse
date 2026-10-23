@@ -3807,10 +3807,40 @@ func (l *Live) buildOverview(ctx context.Context) (*Overview, error) {
 	if gw != nil {
 		gwID = gw.ID
 	}
-	fdbEvidence := fleetFdbEvidence(polled, gwID)
+	// MACs registradas (routers.mac): permiten a fleetFdbEvidence anclar
+	// unidades sin bridge MAC utilizable (DSM: docker0 en bridgeDetect, sin
+	// lldpd) desde el FDB del switch que aprende su NIC (p. ej. NAS en xg4).
+	registeredMacs := make(map[string]string, len(routerList))
+	for _, r := range routerList {
+		if r.MAC != "" {
+			registeredMacs[r.ID] = r.MAC
+		}
+	}
 	// #1279: uplinks resueltos por LLDP (regla de puerto raíz); mandan sobre
-	// la evidencia FDB/device en BuildTopoSemantics.
+	// la evidencia FDB/device en BuildTopoSemantics. Se calcula ANTES que la
+	// FDB para sembrar profundidades: un switch core cuya MAC de chasis nadie
+	// aprende no tiene candidato padre por FDB y, sin semilla, su profundidad
+	// queda desconocida y las unidades cableadas en él caen al gateway.
 	lldpEvidence := fleetLldpEvidence(polled, gwID)
+	seedDepth := map[string]int{}
+	{
+		seedDepth[gwID] = 0
+		for pass := 0; pass <= len(lldpEvidence); pass++ {
+			changed := false
+			for child, ev := range lldpEvidence {
+				if d, ok := seedDepth[ev.parent]; ok {
+					if _, has := seedDepth[child]; !has || seedDepth[child] > d+1 {
+						seedDepth[child] = d + 1
+						changed = true
+					}
+				}
+			}
+			if !changed {
+				break
+			}
+		}
+	}
+	fdbEvidence := fleetFdbEvidence(polled, gwID, registeredMacs, seedDepth)
 	// #1321: los attaches manuales (#142) cuya MAC es la bridge de una unidad
 	// de flota fijan su uplink por encima de toda inferencia.
 	overrideUplinks := fleetOverrideEvidence(overrides, routerList)
