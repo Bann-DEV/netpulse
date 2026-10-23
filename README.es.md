@@ -96,6 +96,18 @@ pausar sin borrarla: sin sondeo ni alertas, con su histórico intacto.
   </picture>
 </p>
 
+**Sobre qué corre.** El servidor es un binario estático de Go en cualquier
+caja Linux. El agente es quien habla con tus routers, y cómo llega depende
+de la plataforma:
+
+| Plataforma | Cómo corre el agente | Notas |
+|---|---|---|
+| OpenWrt (incl. GL.iNet) | Paquete nativo `netpulse-agent` (`.ipk`/`.apk`) | procd, config UCI, `luci-app-netpulse`, instalación y upgrade desde la app |
+| Asuswrt / Asuswrt-Merlin | Binario estático en `/jffs`, fichero de entorno | Sin `ubus`: recurre a `/proc`, `iw` y `lldpd`. Instalación y actualización manuales |
+| RouterOS | Pusher integrado | Topología y clientes deducidos de las tablas del propio router |
+| Switches gestionados | SNMP | Estado de bocas, velocidades y vecinos LLDP-MIB |
+| Cualquier otra cosa con SSH | Sondeo server-side | Sin agente; más lento y sin estado entre sondeos |
+
 **Y el resto del tour:**
 
 - **WireGuard**: peers con sus nombres reales, últimos handshakes,
@@ -151,7 +163,9 @@ anterior se puede tocar en la **[demo en vivo](https://demo.netpulse.cloudless.c
 ## Empieza en unos cinco minutos
 
 Necesitas una caja Linux con systemd (x86_64, arm64 o armv7; un LXC o VM
-pequeña sobra) y routers OpenWrt/GL.iNet en tu LAN.
+pequeña sobra) y routers OpenWrt/GL.iNet en tu LAN. Asuswrt/Merlin también
+está soportado, y cualquier cosa con SSH o SNMP se añade a mano (mira la
+sección plegada de más abajo).
 
 **1. Instala el servidor** en la caja:
 
@@ -185,7 +199,7 @@ el agente, empuja el binario correcto para la arquitectura del router,
 escribe la config y arranca el servicio; aparece como conectado en segundos.
 Los routers a los que el servidor no llega por SSH usan el token de
 emparejamiento (**Ajustes → Adopción de agentes**, mira la sección plegada
-de abajo).
+de abajo), y Asuswrt lleva un binario manual como se cuenta en esa sección.
 
 **5. Llévatela contigo.** Instala la PWA desde el navegador (Añadir a
 pantalla de inicio / Instalar app) y activa Web Push en Ajustes: las alertas
@@ -228,6 +242,32 @@ Si el servidor ya puede hacer SSH al router, sáltate todo esto y pulsa
 SSH, Ajustes → Adopción de agentes muestra un token reutilizable:
 `install-agent.sh --pairing-token` (ejecutado desde cualquier máquina que
 alcance el router y el servidor) registra el agente en el primer contacto.
+
+**Asuswrt / Merlin.** El agente también corre en routers Asuswrt y
+Asuswrt-Merlin (probado en un GT-BE98 Pro con nodos mesh RT-AX92U). Allí no
+hay `opkg`: es un binario estático al uso. Coge
+`netpulse-agent_<versión>_linux_arm64.tar.gz` (o `armv7`, `mips`, `mipsle`
+para hardware más viejo) de la
+[última release](https://github.com/gnacho/netpulse/releases), cópialo a
+`/jffs/` (que sobrevive a los firmwares, a diferencia de `/tmp`) y apúntalo
+a tu servidor. El fichero de config por defecto es
+`/etc/netpulse-agent.env`, así que déjalo en `/jffs` y nómbralo explícito:
+
+```sh
+cat > /jffs/netpulse-agent.env <<'EOF'
+NETPULSE_SERVER=http://<ip-del-servidor-netpulse>:3000
+NETPULSE_SLUG=<slug>
+NETPULSE_TOKEN=<token de 64 hex>
+EOF
+NETPULSE_ENV_FILE=/jffs/netpulse-agent.env /jffs/netpulse-agent &
+```
+
+Para arrancarlo al boot, añade esa misma línea a `/jffs/scripts/init-start`
+(o `services-start`). No hay procd ni reinstall por SSH: las actualizaciones
+van por el comando `upgrade` del propio agente o copiando el binario nuevo.
+Todo lo que no necesita `ubus` funciona, incluida la topología (FDB del
+bridge, `iw`, `lldpd`); lo que depende de específicos de GL.iNet simplemente
+no está.
 
 **Sidecar de latencia.** Sondeos TCP de latencia por router a largo plazo,
 opcionales:
