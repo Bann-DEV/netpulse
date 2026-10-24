@@ -4504,27 +4504,14 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 		}
 	} else {
 		// Backhaul real del AP: boca que enlaza con otro router + latencia
-		// The uplink is a port that links to another router (peerKind
-		// "router-link*"). A managed switch can have several router-links - the
-		// parent uplink plus downlinks to mesh APs - so prefer the fastest one
-		// (the core uplink, e.g. 1/xg27 10G, outranks 1G AP downlinks). The old
-		// matcher looked for Detail=="enlace entre routers", a string that is
-		// never set, and fell back to the first UP port, which made a switch
-		// report a camera access port's 100 Mbps as its backhaul.
 		var uplink *EthPort
-		bestMbps := -1
 		for i := range enriched {
-			ep := &enriched[i]
-			if !ep.Up || !strings.HasPrefix(ep.PeerKind, "router-link") {
-				continue
-			}
-			if mb := parseSpeedMbps(ep.Speed); mb > bestMbps {
-				bestMbps, uplink = mb, ep
+			if enriched[i].Detail == "enlace entre routers" {
+				uplink = &enriched[i]
+				break
 			}
 		}
 		if uplink == nil {
-			// No router-link peer (e.g. a single-cable AP without LLDP): fall
-			// back to the first UP port as before.
 			for i := range enriched {
 				if enriched[i].Up {
 					uplink = &enriched[i]
