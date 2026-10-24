@@ -429,6 +429,19 @@ func BuildTopoSemantics(routers []Router, devices []Device, wg WireGuardStats, d
 	for _, r := range routerNodes {
 		inRouter[r.ID] = true
 	}
+	// switchRouter: managed switch units (RoleBadge "SW"), e.g. a fleet switch
+	// or an agent-only NAS. A wired client with no FDB port attributed to an AP
+	// is not trustworthy (the AP bridge learns MACs that merely transit its
+	// uplink), so rule 2-Ago-2026 anchors it to the gateway. But a switch/NAS
+	// reports its own downstream clients first-party (e.g. a Docker container
+	// behind the NAS, portless because its veth is in the denylist), so its
+	// RouterID is honored to stay coherent with the unit's client count.
+	switchRouter := map[string]bool{}
+	for _, r := range routerNodes {
+		if r.RoleBadge == "SW" {
+			switchRouter[r.ID] = true
+		}
+	}
 
 	// D1: los Devices cuya MAC es la chassis-MAC de un distnode managed se
 	// representan SOLO como nodo managed (sin chip ni enlaces propios).
@@ -628,7 +641,15 @@ func BuildTopoSemantics(routers []Router, devices []Device, wg WireGuardStats, d
 				return d.AttachTo
 			}
 		}
-		if d.Band == "cable" && d.Port == "" {
+		// A wired client with no FDB port is force-anchored to the gateway unless
+		// its RouterID resolves to a managed switch. Attribution to a wireless AP
+		// is not trustworthy without port evidence (the AP bridge learns MACs
+		// that merely transit its uplink — rule 2-Ago-2026), but a switch/NAS
+		// reports its own downstream clients first-party (e.g. a Docker container
+		// behind the NAS, portless because its veth is in the port denylist);
+		// honoring that RouterID keeps the chip coherent with the unit's client
+		// count. Mirrors the model.ts hubOf guard.
+		if d.Band == "cable" && d.Port == "" && !switchRouter[d.RouterID] {
 			return gateway.ID
 		}
 		return d.RouterID
