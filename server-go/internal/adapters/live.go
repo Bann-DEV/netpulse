@@ -3462,6 +3462,9 @@ func (l *Live) buildDevices(polled map[string]*routerPolled, wanPort string) []D
 		}
 		devices = append(devices, d)
 	}
+	// SNMP switches have no per-MAC accounting; give their wired clients a
+	// figure from the switch port byte counters (see helper).
+	l.applySnmpSwitchPortTraffic(polled, devices)
 	// Orden estable por MAC (issue #656): buildDevices itera un mapa de Go
 	// (allMacs), cuyo orden es aleatorio entre ticks. Ese orden llega al
 	// frontend y alimenta la asignación de ranuras de los anillos de la
@@ -3470,6 +3473,82 @@ func (l *Live) buildDevices(polled map[string]*routerPolled, wanPort string) []D
 	sort.Slice(devices, func(i, j int) bool { return devices[i].MAC < devices[j].MAC })
 	// #1151: canónicas + fusión de enlazadas (orden: normalizar -> fusionar).
 	return normalizeDevices(mergeLinkedDevices(devices, l.deviceLinks()))
+}
+
+// applySnmpSwitchPortTraffic gives wired clients learned on an SNMP switch a
+// traffic figure from that switch's own port byte counters. A managed switch
+// has no per-MAC accounting (nlbwmon is an OpenWrt/agent feature), and switch-
+// local flows (e.g. a camera to an NVR on the same switch) never traverse the
+// gateway, so the gateway's per-MAC rate reports only the tiny gateway-bound
+// slice - the client otherwise looks idle. The switch port does see the whole
+// flow, so we attribute the port's rx+tx rate to the clients learned on it,
+// split evenly when several MACs share a port so a trunk is not duplicated
+// onto each. Only SNMP-enabled routers are consulted, and we only RAISE a
+// client's rate (never lower an agent-reported figure), so gateway/AP clients
+// are untouched.
+func (l *Live) applySnmpSwitchPortTraffic(polled map[string]*routerPolled, devices []Device) {
+	type portKey struct{ router, port string }
+
+	// Mbps per (router, port name). Indexed by every alias a port can carry so
+	// the FDB's name (its DisplayName = Label/Iface) resolves.
+	rate := map[portKey]float64{}
+	for rID, p := range polled {
+		if p == nil || !p.cfg.SnmpEnabled {
+			continue
+		}
+		for _, ep := range p.ports {
+			bps := ep.RxBps + ep.TxBps
+			if bps <= 0 {
+				continue
+			}
+			mp := bps / 1e6
+			for _, name := range []string{ep.ID, ep.Label, ep.Iface} {
+				if name != "" {
+					rate[portKey{rID, name}] = mp
+				}
+			}
+		}
+	}
+	if len(rate) == 0 {
+		return
+	}
+
+	// A client's port comes from the switch's own FDB (mac -> port), the same
+	// uppercased-MAC key the topology step uses. Device.Port is not filled yet
+	// at this point (inferTopology runs later), so we resolve from FDB directly.
+	resolve := func(d *Device) (portKey, bool) {
+		if !d.Online || d.RouterID == "" {
+			return portKey{}, false
+		}
+		p := polled[d.RouterID]
+		if p == nil || !p.cfg.SnmpEnabled || len(p.fdb) == 0 {
+			return portKey{}, false
+		}
+		port, ok := p.fdb[strings.ToUpper(d.MAC)]
+		if !ok {
+			return portKey{}, false
+		}
+		k := portKey{d.RouterID, port}
+		return k, rate[k] > 0
+	}
+
+	keys := make([]portKey, len(devices))
+	matched := make([]bool, len(devices))
+	share := map[portKey]int{}
+	for i := range devices {
+		if k, ok := resolve(&devices[i]); ok {
+			keys[i], matched[i] = k, true
+			share[k]++
+		}
+	}
+	for i := range devices {
+		if !matched[i] || share[keys[i]] <= 0 {
+			continue
+		}
+		if mp := rate[keys[i]] / float64(share[keys[i]]); mp > devices[i].TrafficMbps {
+			devices[i].TrafficMbps = mp
+		}
+	}
 }
 
 // normalizeDevices: MACs a formato canónico (mayúsculas, ':') y dedup por
