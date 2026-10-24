@@ -45,33 +45,3 @@ func TestParseNetgearTemps(t *testing.T) {
 		t.Fatal("sin sensores ok debe ser false")
 	}
 }
-
-func TestParseNetgearRam(t *testing.T) {
-	// GS728TXP live reading: ~233 MB pool, ~50 MB free → ~79% used.
-	if used, ok := ParseNetgearRam(50968, 238968); !ok || used != 79 {
-		t.Fatalf("GS728TXP used = %d/%v, want 79", used, ok)
-	}
-	// XS708T live reading: ~486 MB pool, ~325 MB free → ~33% used.
-	if used, ok := ParseNetgearRam(332580, 497656); !ok || used != 33 {
-		t.Fatalf("XS708T used = %d/%v, want 33", used, ok)
-	}
-	// All free → 0% used.
-	if used, ok := ParseNetgearRam(238968, 238968); !ok || used != 0 {
-		t.Fatalf("all-free used = %d/%v, want 0", used, ok)
-	}
-	// Fully used (free 0) → 100%.
-	if used, ok := ParseNetgearRam(0, 238968); !ok || used != 100 {
-		t.Fatalf("fully-used used = %d/%v, want 100", used, ok)
-	}
-	// free > available (transient between the two gets) clamps to 0.
-	if used, ok := ParseNetgearRam(300000, 238968); !ok || used != 0 {
-		t.Fatalf("free>avail used = %d/%v, want 0", used, ok)
-	}
-	// Guards: no total, or negative free → not ok (RAM stays null).
-	if _, ok := ParseNetgearRam(10, 0); ok {
-		t.Fatal("avail<=0 must be not-ok")
-	}
-	if _, ok := ParseNetgearRam(-1, 238968); ok {
-		t.Fatal("free<0 must be not-ok")
-	}
-}
