@@ -105,7 +105,11 @@ type routerPolled struct {
 	// hasCpu: mismo contrato que hasTemp para la CPU de los switches SNMP
 	// (tabla de procesos Netgear FastPath): sin bandera, el null de #441
 	// pisaría la lectura real.
-	hasCpu   bool
+	hasCpu bool
+	// hasRam: same contract for the RAM derived from the Netgear FastPath
+	// MemFree/MemAvailable scalars. Without the flag the #441 nulling would
+	// erase a real reading; the OpenWrt agent path sets RAM without needing it.
+	hasRam   bool
 	sysDescr string
 	// sysName (#1256): hostname que el usuario define en el equipo; para
 	// SNMP alimenta el Name visible de la unidad en flota.
@@ -1562,6 +1566,20 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 		// procesos del agente privado.
 		if p.hasCpu {
 			r.CPU = iptr(p.cpu)
+		}
+		// Netgear FastPath memory: restore the RAM percentage derived from the
+		// MemFree/MemAvailable scalars, same revival channel as hasCpu/hasTemp.
+		if p.hasRam {
+			r.RAM = iptr(p.ram)
+		}
+		// #1528 revived CPU/temp (and now RAM) but left VitalsAvailable=false,
+		// the beacon/external marker the frontend uses to HIDE the whole vitals
+		// row — so the readings were present in the payload yet never shown in
+		// the overview card, fleet list or detail. If the SNMP poll supplied any
+		// real vital this source CAN report vitals: flip the flag so the row
+		// renders (the frontend skips any individual field that is still nil).
+		if r.CPU != nil || r.RAM != nil || r.Temp != nil {
+			r.VitalsAvailable = bptr(true)
 		}
 	}
 	r.SnmpEnabled = p.cfg.SnmpEnabled
