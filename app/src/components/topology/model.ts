@@ -837,7 +837,19 @@ export function buildTopologyModel({ routers, devices, wan, wireguard, distribut
     if (d.attachTo && (routerById.has(d.attachTo) || distById.has(d.attachTo) || deviceById.has(d.attachTo))) {
       return d.attachTo
     }
-    if (isWired(d) && !d.port && gatewayNode) return gatewayNode.id
+    // A wired client with no FDB port is force-anchored to the gateway unless
+    // its routerId resolves to a managed switch. Attribution to a wireless AP
+    // is not trustworthy without port evidence (rule 2-Ago-2026), but a
+    // switch/NAS reports its own downstream clients first-party (e.g. a Docker
+    // container behind the NAS, portless because its veth is in the port
+    // denylist); honoring that routerId keeps the chip coherent with the unit's
+    // client count. Mirrors the hubOf guard in server topo_semantics.go.
+    if (
+      isWired(d) && !d.port && gatewayNode &&
+      routerById.get(d.routerId)?.router.roleBadge !== 'SW'
+    ) {
+      return gatewayNode.id
+    }
     return d.routerId
   }
   // SPEC-65 D65-3/D65-9 B2: con semántica server-side, los anillos llegan

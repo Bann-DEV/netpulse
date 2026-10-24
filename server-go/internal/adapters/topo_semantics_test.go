@@ -229,6 +229,41 @@ func TestTopoSemanticsWanPeer(t *testing.T) {
 	}
 }
 
+// A wired client with no FDB port keeps its real (non-gateway) attribution:
+// a Docker container behind the NAS reports Band=cable with an empty Port
+// (its veth lands in the port denylist), but RouterID already resolved it to
+// the NAS. hubOf must honor that RouterID instead of force-anchoring it to
+// the gateway, so it lands in the NAS ring and matches the unit's client
+// count. Mirrors the model.ts hubOf guard.
+func TestTopoSemanticsWiredNoPortHonorsNonGatewayRouter(t *testing.T) {
+	routers := []Router{
+		{ID: "gw", Name: "gateway", RoleBadge: "Principal", MAC: "AA:BB:CC:00:00:01"},
+		{ID: "nas", Name: "nas", RoleBadge: "SW", MAC: "AA:BB:CC:00:00:02"},
+	}
+	devices := []Device{
+		// The NAS itself, seen on a gateway port (so it is a real switch node).
+		{ID: "dev-nas", MAC: "AA:BB:CC:00:00:02", RouterID: "gw", Band: "cable", Online: true, Port: "3"},
+		// Docker container behind the NAS: cable, no port, attributed to nas.
+		{ID: "docker", MAC: "02:42:AC:11:00:03", RouterID: "nas", Band: "cable", Online: true},
+	}
+	sem := BuildTopoSemantics(routers, devices, WireGuardStats{}, nil, "", nil, nil, nil)
+
+	for _, id := range sem.Rings["gw"] {
+		if id == "docker" {
+			t.Fatal("the container must not be anchored to the gateway ring")
+		}
+	}
+	found := false
+	for _, id := range sem.Rings["nas"] {
+		if id == "docker" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the container must be in the NAS ring: rings=%+v", sem.Rings)
+	}
+}
+
 // #1047: la MAC de una unidad de flota aprendida en el FDB de otro miembro
 // ancla su uplink al padre real (ap1 cuelga de sw1, no del gateway), aunque
 // no haya LLDP. La unidad deja de duplicarse como chip de cliente.
