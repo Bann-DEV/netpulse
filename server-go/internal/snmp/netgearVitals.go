@@ -10,9 +10,12 @@
 //   - boxServicesTempSensorTemperature
 //     1.3.6.1.4.1.4526.11.43.1.8.1.5.<idx>: Integer32 en °C por sensor; con
 //     varios sensores se reporta el máximo (el punto caliente).
-//
-// No hay escalar de memoria TOTAL en la MIB (solo MemFree/MemAvailable), así
-// que el RAM queda a null antes que inventar un porcentaje.
+//   - agentSwitchCpuProcessMemFree / MemAvailable (KBytes scalars):
+//     1.3.6.1.4.1.4526.11.1.1.4.1.0 and …4.2.0. There is no "MemTotal" scalar,
+//     but MemAvailable is the device's usable total pool (≈ physical RAM minus
+//     kernel reservations: 233 MB on a 256 MB GS728TXP, 486 MB on a 512 MB
+//     XS708T), so usage is derived as used% = (MemAvailable − MemFree) /
+//     MemAvailable.
 package snmp
 
 import (
@@ -23,10 +26,14 @@ import (
 )
 
 const (
-	// OidNetgearCpuUtil: columna de utilización por proceso (string 5/60/300s).
+	// OidNetgearCpuUtil: per-process utilization column (5/60/300s string).
 	OidNetgearCpuUtil = ".1.3.6.1.4.1.4526.11.1.1.4.8.1.3"
-	// OidNetgearTempSensor: columna de temperatura por sensor (°C).
+	// OidNetgearTempSensor: per-sensor temperature column (°C).
 	OidNetgearTempSensor = ".1.3.6.1.4.1.4526.11.43.1.8.1.5"
+	// OidNetgearMemFree / OidNetgearMemAvailable: KBytes scalars. MemAvailable
+	// is the usable total pool, MemFree the currently-free part (see header).
+	OidNetgearMemFree      = ".1.3.6.1.4.1.4526.11.1.1.4.1.0"
+	OidNetgearMemAvailable = ".1.3.6.1.4.1.4526.11.1.1.4.2.0"
 )
 
 // cpuUtilRe casa la primera ventana ("5 Sec (  0.19%)") del string por
@@ -74,12 +81,54 @@ func ParseNetgearTemps(vals []int) (temp int, ok bool) {
 	return max, ok
 }
 
+// ParseNetgearRam derives the used-memory percentage from the two KBytes
+// scalars: MemAvailable is the usable total pool and MemFree the currently
+// free part, so used% = (available - free) / available. Guards against a
+// missing/zero total and free>available (transient between the two gets).
+func ParseNetgearRam(freeKB, availKB int) (used int, ok bool) {
+	if availKB <= 0 || freeKB < 0 {
+		return 0, false
+	}
+	usedF := float64(availKB-freeKB) / float64(availKB) * 100.0
+	if usedF < 0 {
+		usedF = 0
+	}
+	used = int(usedF + 0.5)
+	if used > 100 {
+		used = 100
+	}
+	return used, true
+}
+
+// netgearKbFromPDU reads an integer KBytes value from a numeric PDU. Unlike
+// mikrotikTempFromPDU it applies no temperature range cap (memory values are
+// large); NoSuchObject/NoSuchInstance or a non-numeric type → ok=false.
+func netgearKbFromPDU(v g.SnmpPDU) (int, bool) {
+	if v.Type == g.NoSuchObject || v.Type == g.NoSuchInstance {
+		return 0, false
+	}
+	switch v.Type {
+	case g.Gauge32, g.Integer, g.Counter32, g.Counter64:
+	default:
+		return 0, false
+	}
+	bi := g.ToBigInt(v.Value)
+	if bi == nil || !bi.IsInt64() {
+		return 0, false
+	}
+	n := bi.Int64()
+	if n < 0 {
+		return 0, false
+	}
+	return int(n), true
+}
+
 // PollNetgearVitals lee CPU y temperatura del agente FastPath. Un switch sin
 // estos árboles (otra familia) devuelve ok=false en ambos y el caller
 // conserva sus vitales a null, como hoy.
-func PollNetgearVitals(s *g.GoSNMP) (cpu int, okCpu bool, temp int, okTemp bool) {
+func PollNetgearVitals(s *g.GoSNMP) (cpu int, okCpu bool, temp int, okTemp bool, ram int, okRam bool) {
 	if s == nil {
-		return 0, false, 0, false
+		return 0, false, 0, false, 0, false
 	}
 	if pdus, err := walkSafe(s, OidNetgearCpuUtil); err == nil {
 		vals := make([]string, 0, len(pdus))
@@ -100,5 +149,25 @@ func PollNetgearVitals(s *g.GoSNMP) (cpu int, okCpu bool, temp int, okTemp bool)
 		}
 		temp, okTemp = ParseNetgearTemps(vals)
 	}
-	return cpu, okCpu, temp, okTemp
+	// Memory: two KBytes scalars in one GET. Missing/free>available → ok=false
+	// and the caller leaves RAM null (the #441 SNMP nulled-vitals contract).
+	if res, err := s.Get([]string{OidNetgearMemFree, OidNetgearMemAvailable}); err == nil {
+		free, avail, haveFree, haveAvail := 0, 0, false, false
+		for _, p := range res.Variables {
+			switch p.Name {
+			case OidNetgearMemFree:
+				if v, ok := netgearKbFromPDU(p); ok {
+					free, haveFree = v, true
+				}
+			case OidNetgearMemAvailable:
+				if v, ok := netgearKbFromPDU(p); ok {
+					avail, haveAvail = v, true
+				}
+			}
+		}
+		if haveFree && haveAvail {
+			ram, okRam = ParseNetgearRam(free, avail)
+		}
+	}
+	return cpu, okCpu, temp, okTemp, ram, okRam
 }
