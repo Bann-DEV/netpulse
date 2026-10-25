@@ -105,8 +105,13 @@ type routerPolled struct {
 	// hasCpu: mismo contrato que hasTemp para la CPU de los switches SNMP
 	// (tabla de procesos Netgear FastPath): sin bandera, el null de #441
 	// pisaría la lectura real.
-	hasCpu   bool
-	sysDescr string
+	hasCpu bool
+	// hasRam + memory pool (MiB) for Netgear FastPath (MemFree/MemAvailable);
+	// consumed by resolveSnmpVitals in vitals.go.
+	hasRam     bool
+	memTotalMb int
+	memUsedMb  int
+	sysDescr   string
 	// sysName (#1256): hostname que el usuario define en el equipo; para
 	// SNMP alimenta el Name visible de la unidad en flota.
 	sysName           string
@@ -1551,18 +1556,13 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 		LatencyMs: p.latencyMs,
 	}
 	if noVitals {
-		r.VitalsAvailable = bptr(false)
-		r.CPU, r.RAM, r.Temp = nil, nil, nil
-		// #1256: si el sondeo SNMP trajo temperatura real (MikroTik SwOS),
-		// no la pisamos con null: se conserva la vital junto a las demás.
-		if p.hasTemp {
-			r.Temp = iptr(p.temp)
-		}
-		// Netgear FastPath: misma canalía para la CPU leída de la tabla de
-		// procesos del agente privado.
-		if p.hasCpu {
-			r.CPU = iptr(p.cpu)
-		}
+		// #441 hid all vitals for SNMP/external sources; Netgear FastPath
+		// (CPU/RAM/temp) and MikroTik (temp) do supply real readings.
+		// resolveSnmpVitals (vitals.go) returns exactly those and whether any
+		// exists, so the frontend shows them instead of hiding the whole row.
+		v := resolveSnmpVitals(p)
+		r.CPU, r.RAM, r.Temp = v.cpu, v.ram, v.temp
+		r.VitalsAvailable = bptr(v.available)
 	}
 	r.SnmpEnabled = p.cfg.SnmpEnabled
 	if p.selfExpose {
@@ -4368,6 +4368,15 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 			m := p.sysInfo.Memory
 			extras.UsedMb = int(math.Round(memUsedBytes(m.Total, m.Free, m.Buffered, m.Cached, m.Available, m.Used) / (1024 * 1024)))
 		}
+		// SNMP switches have no sysInfo; use the Netgear memory pool (MiB) so
+		// the detail renders a real "X of Y MB" instead of the frontend's
+		// static demo total (which made a 486 MB XS708T read "of 512 MB").
+		if extras.RamMb == 0 {
+			if v := resolveSnmpVitals(p); v.memTotalMb > 0 {
+				extras.RamMb = v.memTotalMb
+				extras.UsedMb = v.memUsedMb
+			}
+		}
 		if p.sysInfo != nil && p.sysInfo.Timezone != "" {
 			extras.Timezone = p.sysInfo.Timezone
 		}
@@ -4576,10 +4585,22 @@ func (l *Live) GetMetricsRows(context.Context) []MetricsRow {
 			Temp:      fptr(float64(p.temp)),
 			LatencyMs: p.latencyMs,
 		}
-		// #441: SNMP/pushers externos no tienen vitals reales; no se
-		// persisten ceros que luego pintan series planas.
+		// #441: SNMP/pushers externos no tienen vitals por defecto; no se
+		// persisten ceros. Pero Netgear/MikroTik sí traen lecturas reales:
+		// revivirlas por su bandera (vitals.go) para que el histórico de
+		// métricas las grabe y las curvas no queden planas en 0.
 		if p.cfg.SnmpEnabled || p.agentKind == "external" {
+			v := resolveSnmpVitals(p)
 			row.CPU, row.RAM, row.Temp = nil, nil, nil
+			if v.cpu != nil {
+				row.CPU = fptr(float64(*v.cpu))
+			}
+			if v.ram != nil {
+				row.RAM = fptr(float64(*v.ram))
+			}
+			if v.temp != nil {
+				row.Temp = fptr(float64(*v.temp))
+			}
 		}
 		if p.net != nil {
 			row.RxBps = p.net.RxBps
