@@ -193,5 +193,129 @@
     "noImportantAlerts": "你的网络状态良好",
     "importantAlerts_one": "{{count}} 条重要告警",
     "importantAlerts_other": "{{count}} 条重要告警"
+  },
+  "topology": {
+    "animateFlow": "动画显示数据包流动",
+    "clickDetail": "点击查看设备详情 →",
+    "connectedClient": "已连接客户端",
+    "flow": "流动",
+    "interactiveMap": "交互式网络图",
+    "internetAria": "互联网，{{isp}}，光纤 {{plan}}",
+    "labels": "标签",
+    "edit": "编辑",
+    "editHint": "编辑布局：拖拽路由器和客户端以调整间距。保存后位置固定，不再自动重排。",
+    "editBanner": "编辑模式：拖拽路由器和客户端以调整地图",
+    "editSave": "保存",
+    "editReset": "恢复自动布局",
+    "legend": {
+      "bandConnection": "频段 / 连接",
+      "healthy": "健康",
+      "hide": "隐藏图例",
+      "show": "显示图例",
+      "summary": "{{online}} 客户端在线 · {{peersTotal}} 个 VPN 对端中 {{peers}} 个 · {{links}} 条活动链路",
+      "title": "图例",
+      "wired": "有线",
+      "wgTunnel": "WireGuard 隧道",
+      "peerDown": "无隧道的对端（已断开）",
+      "wiredLink": "物理网线（WAN、上行、设备）",
+      "wifiUplink": "WiFi 上行（无线回程）",
+      "lldpIdentified": "通过 LLDP 识别",
+      "inferredSwitch": "推断的交换机或网桥（无 IP）",
+      "hypervisorHost": "宿主机（带 +N 徽标）",
+      "ctGrid": "以网格形式嵌套在主机下的 CT/VM"
+    },
+    "links": {
+      "colLink": "链路",
+      "colSpeed": "速率",
+      "colPing": "Ping",
+      "congestedChannel": "拥置信道",
+      "fiberWan": "WAN 光纤",
+      "hypervisorCable": "宿主机网线",
+      "inferredSwitch": "推断交换机 · {{port}}",
+      "managedSwitch": "网管交换机",
+      "managedAp": "无线接入点",
+      "throughput": "链路吞吐",
+      "title": "设备间链路",
+      "wifiUplink": "WiFi 上行"
+    },
+    "mapAria": "网络图：互联网连接到 Flint 2 网关，三个无线接入点（客厅、书房、露台）及其客户端，以及两条活动的 WireGuard 隧道。",
+    "peerAria": "{{name}}，活动 WireGuard 隧道，{{ip}}",
+    "peerAriaDown": "{{name}}，WireGuard 隧道已断开，{{ip}}",
+    "peerAriaUrgent": "{{name}}，活动 WireGuard 隧道，标记为紧急，{{ip}}",
+    "peerAriaUrgentDown": "{{name}}，WireGuard 隧道已断开，标记为紧急，{{ip}}",
+    "peer": {
+      "down": "已断开",
+      "downHint": "无活动隧道：近期无握手",
+      "urgent": "紧急",
+      "urgentHint": "断开时告警并在地图上置顶",
+      "urgentAria": "切换 {{name}} 的紧急标记"
+    },
+    "plan": "套餐",
+    "received": "接收",
+    "refreshNow": "立即刷新",
+    "refreshing": "刷新中…",
+    "resetView": "居中并重置视图",
+    "routerAria": "{{name}}，{{model}}，{{clients}} 个客户端",
+    "sent": "发送",
+    "showLabels": "显示标签",
+    "subtitle": "你的网络实时视图",
+    "tapAgainDetail": "再次点击查看设备详情 →",
+    "tunnel": "隧道",
+    "weakSignal": "信号弱",
+    "zoomControls": "地图缩放控件",
+    "tagDevices": "标记设备",
+    "tagThis": "标记",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "usteer": {
+      "title": "WiFi 漫游（usteer）",
+      "caption": "AP 间的频段引导网格",
+      "clients": "{{count}} 个客户端",
+      "util": "利用率 {{pct}}%"
+    },
+    "port": "端口",
+    "signal": "信号",
+    "traffic": "流量",
+    "connection": "连接",
+    "viaInternet": "经由互联网 → 网关",
+    "peerVia": "VPN · 经由互联网",
+    "lldpIdentified": "通过 LLDP 识别：机箱 \"{{chassis}}\" · 管理 {{mgmt}} · 能力 {{caps}} · 远端端口 {{port}}",
+    "dist": {
+      "title": "交换机或网桥",
+      "inferred": "推断",
+      "managed": "网管交换机",
+      "noIp": "无 IP · 不可直接查询",
+      "port": "{{owner}} 上的端口",
+      "macs": "已学习 MAC",
+      "fdbNote": "FDB：单个物理端口上有 {{count}} 个异构 MAC。可能是交换机；无 LLDP 无法确定。",
+      "ap": "无线接入点"
+    },
+    "host": {
+      "hypervisor": "虚拟机管理程序",
+      "proxmox": "Proxmox",
+      "note": "宿主机：其虚拟网桥后有 {{count}} 个 CT/VM——不是交换机"
+    },
+    "ct": {
+      "pill": "CT",
+      "note": "宿主机上的容器 · 其流量走宿主机的网线",
+      "noteIn": "{{host}} 上的容器 · 虚拟网桥（{{port}}）· 流量走宿主机的网线"
+    },
+    "peers": {
+      "overflowTitle": "还有 {{count}} 个对端",
+      "overflowTitleUrgent": "还有 {{count}} 个对端 · {{urgent}} 个紧急",
+      "overflowAria": "另外 {{count}} 个 WireGuard 对端",
+      "overflowAriaDown": "另外 {{count}} 个 WireGuard 对端，{{down}} 个已断开",
+      "overflowAriaUrgent": "另外 {{count}} 个 WireGuard 对端，{{urgent}} 个紧急",
+      "overflowAriaUrgentDown": "另外 {{count}} 个 WireGuard 对端，{{urgent}} 个紧急、{{down}} 个已断开"
+    },
+    "ring": {
+      "overflowAria": "{{router}} 上还有 {{count}} 个客户端",
+      "overflowTitle": "{{router}} 上还有 {{count}} 个客户端"
+    },
+    "vm": {
+      "pill": "VM",
+      "note": "宿主机上的虚拟机 · 其流量走宿主机的网线",
+      "noteIn": "{{host}} 上的虚拟机 · 虚拟网桥（{{port}}）· 流量走宿主机的网线"
+    }
   }
 }
