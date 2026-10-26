@@ -3462,6 +3462,9 @@ func (l *Live) buildDevices(polled map[string]*routerPolled, wanPort string) []D
 		}
 		devices = append(devices, d)
 	}
+	// Give clients learned only in an SNMP switch's FDB a traffic figure from
+	// that port's counters (see switchporttraffic.go).
+	l.applySnmpSwitchPortTraffic(polled, devices)
 	// Orden estable por MAC (issue #656): buildDevices itera un mapa de Go
 	// (allMacs), cuyo orden es aleatorio entre ticks. Ese orden llega al
 	// frontend y alimenta la asignación de ranuras de los anillos de la
