@@ -4407,21 +4407,8 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 		}
 	} else {
 		// Backhaul real del AP: boca que enlaza con otro router + latencia
-		var uplink *EthPort
-		for i := range enriched {
-			if enriched[i].Detail == "enlace entre routers" {
-				uplink = &enriched[i]
-				break
-			}
-		}
-		if uplink == nil {
-			for i := range enriched {
-				if enriched[i].Up {
-					uplink = &enriched[i]
-					break
-				}
-			}
-		}
+		// (la elección de boca vive en backhaul.go).
+		uplink := pickBackhaulUplink(enriched)
 		speed := "—"
 		if uplink != nil && uplink.Speed != "" {
 			speed = uplink.Speed
