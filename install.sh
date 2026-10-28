@@ -342,6 +342,7 @@ if [ ! -f "$STATE_DIR/.env" ]; then
         $SUDO tee "$STATE_DIR/.env" >/dev/null <<EOF
 PORT=$PORT
 DATA_DIR=./data
+NETPULSE_BIND=127.0.0.1
 AUTH_USER=admin
 AUTH_PASS=$ADMIN_PASS
 DEMO_MODE=$DEMO
@@ -547,7 +548,22 @@ printf '\n%s================ %s installed ================%s\n' "$C_G" "$APP_NAM
 printf 'Version:  %s%s\n' "$NETPULSE_VERSION" "$( [ "$UPGRADING" -eq 1 ] && echo " (upgrade — previous binary at $INSTALL_DIR/$BIN_NAME.bak)" || true)"
 printf 'Binary:   %s\n' "$INSTALL_DIR/$BIN_NAME"
 printf 'Data:     %s (SQLite, .env, SSH keypair)\n' "$STATE_DIR"
-printf 'Access:   http://<this-machine-ip>:%s\n' "$PORT"
+# Access line (#1647): a fresh install without TLS binds the listener to
+# loopback, so the LAN URL was wrong. Honour NETPULSE_BIND when it is set.
+BIND_ADDR=$(sed -n 's/^NETPULSE_BIND=//p' "$STATE_DIR/.env" 2>/dev/null | head -1 || true)
+if [ -z "$BIND_ADDR" ]; then
+    if [ -f "$STATE_DIR/data/netpulse.db" ]; then
+        BIND_ADDR=0.0.0.0
+    else
+        BIND_ADDR=127.0.0.1
+    fi
+fi
+if [ -n "$BIND_ADDR" ] && [ "$BIND_ADDR" != "0.0.0.0" ]; then
+    printf 'Access:   http://%s:%s (local only)\n' "$BIND_ADDR" "$PORT"
+    printf '          LAN clients: add NETPULSE_BIND=0.0.0.0 to %s and restart\n' "$STATE_DIR/.env"
+else
+    printf 'Access:   http://<this-machine-ip>:%s\n' "$PORT"
+fi
 if [ "${FRESH_CREDENTIALS:-0}" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
     printf '\nInitial credentials (shown ONCE — change them after logging in):\n'
     printf '  user:     admin\n  password: %s\n' "$ADMIN_PASS"
