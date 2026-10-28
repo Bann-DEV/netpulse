@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.0] - 2026-10-28
+
+### Added
+
+- **Errores por puerto en el beacon (#1620, #1622)**: el switch envía los contadores de errores RX y TX de cada puerto (`ie`/`oe`, los mismos valores que `ifInErrors`/`ifOutErrors` de la IF-MIB) y el servidor los guarda en `port_series_raw`, de modo que la salud del puerto deja de calcularse con errores a cero. Los beacons antiguos siguen valiendo: los campos son opcionales y se leen como cero.
+
 ### Changed
 
 - **Asuswrt/Merlin pasa a integración externa (#1579)**: el tipo nativo `asuswrt` se migra a `external` conservando el token, las sondas portables siguen compartidas y el nuevo `asuswrt-pusher` vive en `netpulse-integrations`. Desaparecen el alta como `asuswrt` y su actualización desde la UI. La instalación y actualización pasan a ser manuales, como en las demás integraciones externas.
