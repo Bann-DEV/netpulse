@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.49.1] - 2026-10-29
+
+### Fixed
+
+- Router integrations wrote the pusher interval as a bare number (`30`) while the external pusher parses it with Go durations, so every integration stopped on start with `invalid NETPULSE_INTERVAL`. The value is now written with its unit (`30s`). Regression test added.
+
 ## [2.49.0] - 2026-10-29
 
 ### Added
