@@ -295,10 +295,6 @@ type Live struct {
 	snmpPorts map[string]map[string]snmpPortSample
 	// snmpLastPoll (issue #414): timestamp del último poll SNMP real por router.
 	snmpLastPoll map[string]time.Time
-	// roNetPrev: última muestra de contadores rx/tx del interfaz WAN de un
-	// router RouterOS, para calcular bps por delta entre polls (igual que
-	// GetNetDev de OpenWrt sobre /proc/net/dev, routeros_api.go).
-	roNetPrev map[string]netByteSample
 	// fwAlert (#1411): estado de la alerta de firmware por unidad con target
 	// configurado: qué relación se alertó y contra qué versiones. Con eso la
 	// alerta es un episodio por unidad (se abre una vez, se actualiza solo si
@@ -509,7 +505,6 @@ func NewLive(cfg *config.Config, d *db.DB, initial []RouterConfig, pool *SSHPool
 		lastObsTs:            map[string]int64{},
 		snmpPorts:            map[string]map[string]snmpPortSample{},
 		snmpLastPoll:         map[string]time.Time{},
-		roNetPrev:            map[string]netByteSample{},
 		snmpFdbCount:         map[string]int{},
 		snmpBrMac:            map[string]string{},
 		snmpPollStats:        map[string]*snmpPollStat{},
@@ -632,10 +627,13 @@ func (l *Live) Mode() string { return "live" }
 // candidato a switch (red plana) devuelve vacío: el auto-cableado no
 // inventa nada.
 func (l *Live) FleetFdbUplinks() map[string]FdbUplink {
+	l.mu.Lock()
 	gw := ""
 	if l.gatewayCfg != nil {
 		gw = l.gatewayCfg.ID
 	}
+	polled := cloneLastPolled(l.lastPolled)
+	l.mu.Unlock()
 	// Cobertura por unidad: MACs bridge de flota en su FDB y en cuántos
 	// puertos distintos.
 	type cover struct {
@@ -644,7 +642,7 @@ func (l *Live) FleetFdbUplinks() map[string]FdbUplink {
 	}
 	cov := map[string]*cover{}
 	brMacOf := map[string]string{}
-	for id, p := range l.lastPolled {
+	for id, p := range polled {
 		if p == nil {
 			continue
 		}
@@ -688,13 +686,13 @@ func (l *Live) FleetFdbUplinks() map[string]FdbUplink {
 	// también sale: su enlace al switch es el uplink de toda la casa.
 	infraBr := brMacOf[infra]
 	out := map[string]FdbUplink{}
-	for mac, port := range l.lastPolled[infra].fdb {
+	for mac, port := range polled[infra].fdb {
 		owner, ok := brMacOf[strings.ToUpper(mac)]
 		if !ok || owner == infra {
 			continue
 		}
 		childPort := ""
-		if lm, ok := l.lastPolled[owner]; ok && lm != nil {
+		if lm, ok := polled[owner]; ok && lm != nil {
 			childPort = lm.fdb[infraBr]
 		}
 		out[owner] = FdbUplink{ChildID: owner, ParentID: infra, Port: port, ChildPort: childPort}
@@ -703,6 +701,17 @@ func (l *Live) FleetFdbUplinks() map[string]FdbUplink {
 }
 
 // Tick: no-op (el sondeo real ocurre en GetOverview, como el JS).
+func cloneLastPolled(src map[string]*routerPolled) map[string]*routerPolled {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]*routerPolled, len(src))
+	for id, p := range src {
+		dst[id] = p
+	}
+	return dst
+}
+
 func (l *Live) Tick(context.Context) error { return nil }
 
 // Close cierra el pool SSH.
@@ -719,10 +728,7 @@ func (l *Live) SetRouters(list []RouterConfig) {
 	l.gatewayCfg = pickGateway(l.routers)
 	l.clients = map[string]*OpenWrtClient{}
 	for _, c := range l.routers {
-		// RouterOS no habla SSH/ubus: se sondea por su REST API (routeros_live.go),
-		// sin cliente SSH. Asuswrt tampoco se sondea por SSH (no hay ubus): su
-		// única fuente es el agente (#1481); sin agente la unidad cae a offline.
-		if !c.AgentOnly && c.Type != "routeros" && c.Type != "asuswrt" {
+		if !c.AgentOnly {
 			l.clients[c.ID] = NewOpenWrtClient(c, l.pool, "root", "")
 		}
 	}
@@ -778,11 +784,6 @@ func (l *Live) SetRouters(list []RouterConfig) {
 	for id := range l.snmpBrMac {
 		if !ids[id] {
 			delete(l.snmpBrMac, id)
-		}
-	}
-	for id := range l.roNetPrev {
-		if !ids[id] {
-			delete(l.roNetPrev, id)
 		}
 	}
 	for id := range l.snmpLastMetricsTick {
@@ -1163,9 +1164,6 @@ func (l *Live) pollRouter(ctx context.Context, cfg RouterConfig) (*routerPolled,
 	}
 	if cfg.SnmpEnabled {
 		return l.pollRouterSNMP(cfg)
-	}
-	if cfg.Type == "routeros" {
-		return l.pollRouterROS(cfg)
 	}
 	l.mu.Lock()
 	client := l.clients[cfg.ID]
@@ -1551,18 +1549,10 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 		LatencyMs: p.latencyMs,
 	}
 	if noVitals {
-		r.VitalsAvailable = bptr(false)
 		r.CPU, r.RAM, r.Temp = nil, nil, nil
-		// #1256: si el sondeo SNMP trajo temperatura real (MikroTik SwOS),
-		// no la pisamos con null: se conserva la vital junto a las demás.
-		if p.hasTemp {
-			r.Temp = iptr(p.temp)
-		}
-		// Netgear FastPath: misma canalía para la CPU leída de la tabla de
-		// procesos del agente privado.
-		if p.hasCpu {
-			r.CPU = iptr(p.cpu)
-		}
+		v := resolvePartialVitals(p)
+		r.CPU, r.Temp = v.cpu, v.temp
+		r.VitalsAvailable = bptr(v.available)
 	}
 	r.SnmpEnabled = p.cfg.SnmpEnabled
 	if p.selfExpose {
@@ -1570,8 +1560,6 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 	}
 	if isGw {
 		r.Role, r.RoleBadge = "Gateway principal", "Principal"
-	} else if p.cfg.Type == "routeros" {
-		r.Role, r.RoleBadge = "Router", "Router"
 	} else if cfgIsSwitch(p.cfg) {
 		// external sondeado por SNMP = switch en la práctica (#661); evita el
 		// fallback AP para los switches SNMP de crowedavid (#1137).
@@ -1620,8 +1608,8 @@ func (l *Live) buildRouter(p *routerPolled, history []histPoint) Router {
 	if p.firmwareAvailable != "" {
 		r.FirmwareOutdated = true
 		l.evalFirmwareUnknownTarget(p.cfg.ID, name, "")
-		// Rama RouterOS (sondeo API): se conserva el aviso por ciclo como
-		// hasta #1411; la dedup de 5 min lo acota.
+		// External pushers keep the per-cycle warning as before #1411; the
+		// five-minute dedup bounds it.
 		l.engine.Emit(AlertEvent{
 			ID:       fmt.Sprintf("alert-firmware-%s-%d", p.cfg.ID, time.Now().UnixMilli()),
 			Category: alerts.CatSystem, Urgent: false,
@@ -1671,7 +1659,7 @@ func (l *Live) uplinkLldp(p *routerPolled) *LldpInfo {
 		return nil
 	}
 	l.mu.Lock()
-	polled := l.lastPolled
+	polled := cloneLastPolled(l.lastPolled)
 	l.mu.Unlock()
 	routers := routerIdentities(polled)
 	for i := range p.lldp {
@@ -1718,10 +1706,6 @@ func (l *Live) offlineRouter(cfg RouterConfig) Router {
 		switch cfg.Type {
 		case "glinet":
 			model = "GL.iNet"
-		case "asuswrt":
-			model = "Asuswrt"
-		case "routeros":
-			model = "RouterOS"
 		case "managed-switch":
 			model = "Managed Switch"
 		}
@@ -1738,8 +1722,6 @@ func (l *Live) offlineRouter(cfg RouterConfig) Router {
 		}
 		if gw != nil && cfg.ID == gw.ID {
 			r.Role, r.RoleBadge = "Gateway principal", "Principal"
-		} else if cfg.Type == "routeros" {
-			r.Role, r.RoleBadge = "Router", "Router"
 		} else if cfg.Type == "managed-switch" || (cfg.Type == "external" && cfg.SnmpEnabled) {
 			r.Role, r.RoleBadge = "Switch", "SW"
 		} else if cfg.Type == "external" {
@@ -3462,6 +3444,9 @@ func (l *Live) buildDevices(polled map[string]*routerPolled, wanPort string) []D
 		}
 		devices = append(devices, d)
 	}
+	// Give clients learned only in an SNMP switch's FDB a traffic figure from
+	// that port's counters (see switchporttraffic.go).
+	l.applySnmpSwitchPortTraffic(polled, devices)
 	// Orden estable por MAC (issue #656): buildDevices itera un mapa de Go
 	// (allMacs), cuyo orden es aleatorio entre ticks. Ese orden llega al
 	// frontend y alimenta la asignación de ranuras de los anillos de la
@@ -4110,7 +4095,7 @@ func (l *Live) BoardInfoFor(id string) *BoardInfo {
 func (l *Live) GetRouters(context.Context) []Router {
 	l.mu.Lock()
 	routers := append([]RouterConfig(nil), l.routers...)
-	polled := l.lastPolled
+	polled := cloneLastPolled(l.lastPolled)
 	l.mu.Unlock()
 	out := make([]Router, 0, len(routers))
 	for _, cfg := range routers {
@@ -4206,7 +4191,7 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 	}
 	p := l.lastPolled[id]
 	gw := l.gatewayCfg
-	polledAll := l.lastPolled
+	polledAll := cloneLastPolled(l.lastPolled)
 	l.mu.Unlock()
 	if cfg == nil {
 		return nil, nil
@@ -4400,28 +4385,12 @@ func (l *Live) GetRouterDetail(ctx context.Context, id string) (*RouterDetail, e
 		l.mu.Unlock()
 	}
 	if gw != nil && id == gw.ID {
-		// AdGuard Home y WireGuard (OpenWrt/GL.iNet ubus/SSH) no aplican a RouterOS.
-		if cfg.Type != "routeros" {
-			detail.Adguard = l.pollAdGuard(ctx)
-			detail.Wireguard = l.pollWireGuard(clients)
-		}
+		detail.Adguard = l.pollAdGuard(ctx)
+		detail.Wireguard = l.pollWireGuard(clients)
 	} else {
 		// Backhaul real del AP: boca que enlaza con otro router + latencia
-		var uplink *EthPort
-		for i := range enriched {
-			if enriched[i].Detail == "enlace entre routers" {
-				uplink = &enriched[i]
-				break
-			}
-		}
-		if uplink == nil {
-			for i := range enriched {
-				if enriched[i].Up {
-					uplink = &enriched[i]
-					break
-				}
-			}
-		}
+		// (la elección de boca vive en backhaul.go).
+		uplink := pickBackhaulUplink(enriched)
 		speed := "—"
 		if uplink != nil && uplink.Speed != "" {
 			speed = uplink.Speed
@@ -4479,7 +4448,7 @@ func (l *Live) latencySpark24h(routerID string) []float64 {
 // online, and without it a router's clients come out short.
 func (l *Live) attributedDevices() []Device {
 	l.mu.Lock()
-	polled := l.lastPolled
+	polled := cloneLastPolled(l.lastPolled)
 	l.mu.Unlock()
 	// #656/#678: memo sticky fresca ANTES de buildDevices (atribución) y como
 	// overlay de inferTopology (paridad con el overview), ANTES del sellado PVE
@@ -4535,7 +4504,7 @@ func (l *Live) RouterServingDHCP(mac string) string {
 		return ""
 	}
 	l.mu.Lock()
-	polled := l.lastPolled
+	polled := cloneLastPolled(l.lastPolled)
 	l.mu.Unlock()
 	for id, p := range polled {
 		if p == nil || p.cfg.AgentOnly {
@@ -4576,10 +4545,17 @@ func (l *Live) GetMetricsRows(context.Context) []MetricsRow {
 			Temp:      fptr(float64(p.temp)),
 			LatencyMs: p.latencyMs,
 		}
-		// #441: SNMP/pushers externos no tienen vitals reales; no se
-		// persisten ceros que luego pintan series planas.
+		// #441/#1568: sin lecturas no se persisten ceros falsos, pero una
+		// fuente SNMP/external con CPU o temperatura confirmada sí las conserva.
 		if p.cfg.SnmpEnabled || p.agentKind == "external" {
+			v := resolvePartialVitals(p)
 			row.CPU, row.RAM, row.Temp = nil, nil, nil
+			if v.cpu != nil {
+				row.CPU = fptr(float64(*v.cpu))
+			}
+			if v.temp != nil {
+				row.Temp = fptr(float64(*v.temp))
+			}
 		}
 		if p.net != nil {
 			row.RxBps = p.net.RxBps
@@ -5566,7 +5542,7 @@ func enrichEthPort(port EthPort, netdev string, d portEnrichDeps) EthPort {
 	if neighbor != "" {
 		port.ConnectedTo = d.routerByMac[neighbor]
 		// El cliente traduce la plantilla según PeerKind (#1039).
-		port.PeerKind = "router-link"
+		port.PeerKind = PeerKindRouterLink
 		// #1150: con switches encadenados la boca aprende las MACs de bridge
 		// de VARIAS unidades (el tráfico de sw2 atraviesa sw1) y la primera
 		// MAC ordenada puede nombrar al switch LEJANO. El LLDP anuncia al
@@ -5574,7 +5550,7 @@ func enrichEthPort(port EthPort, netdev string, d portEnrichDeps) EthPort {
 		// o su sysName manda sobre la MAC ordenada, y la mgmt-ip va al
 		// detalle del hover.
 		if nb := lldpNeighborOnPort(d.lldp, netdev); nb != nil {
-			port.PeerKind = "router-link-lldp"
+			port.PeerKind = PeerKindRouterLinkLLDP
 			if nb.ChassisMac != "" {
 				// La MAC del vecino (su bridge) va al hover como en las bocas
 				// de dispositivo único (#1150).
@@ -5603,7 +5579,7 @@ func enrichEthPort(port EthPort, netdev string, d portEnrichDeps) EthPort {
 			port.DeviceMac = all[0]
 			// La pista "cliente WiFi detrás" la traduce el cliente
 			// según PeerKind (#1039); el nombre del AP viaja en ConnectedTo.
-			port.PeerKind = "ap-wifi"
+			port.PeerKind = PeerKindAPWiFi
 			return port
 		}
 	}
@@ -5642,14 +5618,14 @@ func enrichEthPort(port EthPort, netdev string, d portEnrichDeps) EthPort {
 				// El cliente compone "nombre · detrás de <label>" con
 				// su i18n (#1039); aquí viaja el nombre a pelo.
 				port.ConnectedTo = name
-				port.PeerKind = "curated"
+				port.PeerKind = PeerKindCurated
 			} else if lldpName != "" {
 				// #931: sin nombre mejor, el equipo se anuncia por LLDP.
 				port.ConnectedTo = lldpName
-				port.PeerKind = "mac"
+				port.PeerKind = PeerKindMAC
 			} else {
 				port.ConnectedTo = port.Label
-				port.PeerKind = "mac"
+				port.PeerKind = PeerKindMAC
 			}
 			if lease, ok := d.leaseMap[mac]; ok && lease.IP != "" {
 				port.Detail = lease.IP
@@ -5733,7 +5709,7 @@ func enrichEthPort(port EthPort, netdev string, d portEnrichDeps) EthPort {
 		} else {
 			// Switch/bridge tonto inferido: sin lease ni alias que lo
 			// nombre. El cliente traduce la etiqueta (#1039/#1040).
-			port.PeerKind = "inferred-switch"
+			port.PeerKind = PeerKindInferredSwitch
 		}
 		return port
 	}

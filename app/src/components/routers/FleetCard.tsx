@@ -92,7 +92,7 @@ export function FleetCard({ router, index = 0, refreshKey = 0 }: FleetCardProps)
   const inStartupGrace = (serverUptimeSec ?? Number.MAX_SAFE_INTEGER) < STARTUP_GRACE_SEC
   const extras = isDemo ? getRouterExtras(router.id) : EMPTY_EXTRAS
   const warn = router.status === 'warn'
-  const isOpenWrt = !router.type || router.type === 'glinet' || router.type === 'openwrt' || router.type === 'asuswrt'
+  const isOpenWrt = !router.type || router.type === 'glinet' || router.type === 'openwrt'
   const agentDown = isOpenWrt && agent !== undefined && !agent.fresh
   const agentMissing = isOpenWrt && agent === undefined && router.agentOnly
   const reduce = useReducedMotion()
@@ -189,15 +189,13 @@ export function FleetCard({ router, index = 0, refreshKey = 0 }: FleetCardProps)
                 <AgentBadge agent={agent} agentOnly={router.agentOnly} deviceType={router.type} />
               </div>
               <div className="truncate text-caption text-text-muted">
-                {router.type === 'routeros'
-                  ? (router.model || 'RouterOS')
-                  : router.type === 'managed-switch'
-                    ? (router.model || 'Switch')
-                    : isPrimary
-                      ? router.model
-                      : `OpenWrt · ${router.modelShort}`}
+                {router.type === 'managed-switch'
+                  ? (router.model || 'Switch')
+                  : isPrimary
+                    ? router.model
+                    : `OpenWrt · ${router.modelShort}`}
               </div>
-              {isPrimary && router.type !== 'routeros' && router.type !== 'managed-switch' && (
+              {isPrimary && router.type !== 'managed-switch' && (
                 <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-elevated px-2 py-0.5">
                   {/* #1136: el punto AdGuard solo con AdGuard configurado. */}
                   {adguard.host && (
@@ -276,16 +274,18 @@ export function FleetCard({ router, index = 0, refreshKey = 0 }: FleetCardProps)
             </p>
           ) : (
             <>
-              <MetricRow icon={Cpu} label="CPU" value={`${router.cpu} %`} pct={router.cpu ?? 0} hot={router.hotMetric === 'cpu'} />
-              <MetricRow icon={MemoryStick} label={t('common.memory')} value={`${router.ram} %`} pct={router.ram ?? 0} hot={router.hotMetric === 'ram'} />
-              <MetricRow
-                icon={Thermometer}
-                label={t('common.temperature')}
-                value={fmtTemp(router.temp, tempUnit)}
-                pct={Math.min(100, ((router.temp ?? 0) / 90) * 100)}
-                hot={router.hotMetric === 'temp'}
-                title={router.hotMetric === 'temp' ? t('routers.tempThreshold', { value: fmtTemp(router.tempThreshold ?? 65, tempUnit) }) : undefined}
-              />
+              {router.cpu !== null && <MetricRow icon={Cpu} label="CPU" value={`${router.cpu} %`} pct={router.cpu ?? 0} hot={router.hotMetric === 'cpu'} />}
+              {router.ram !== null && <MetricRow icon={MemoryStick} label={t('common.memory')} value={`${router.ram} %`} pct={router.ram ?? 0} hot={router.hotMetric === 'ram'} />}
+              {router.temp !== null && (
+                <MetricRow
+                  icon={Thermometer}
+                  label={t('common.temperature')}
+                  value={fmtTemp(router.temp, tempUnit)}
+                  pct={Math.min(100, ((router.temp ?? 0) / 90) * 100)}
+                  hot={router.hotMetric === 'temp'}
+                  title={router.hotMetric === 'temp' ? t('routers.tempThreshold', { value: fmtTemp(router.tempThreshold ?? 65, tempUnit) }) : undefined}
+                />
+              )}
             </>
           )}
         </div>

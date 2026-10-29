@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gnacho/netpulse/server-go/internal/adapters"
 	"github.com/gnacho/netpulse/server-go/internal/auth"
 	"github.com/gnacho/netpulse/server-go/internal/discover"
 	"github.com/gnacho/netpulse/server-go/internal/pve"
@@ -89,9 +90,56 @@ func (s *server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// routerListItem es la vista HTTP de un router. Omite la comunidad SNMP,
+// que solo necesita el adapter para sondear, y expone si esta configurada.
+type routerListItem struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Host             string `json:"host"`
+	Type             string `json:"type"`
+	IsGateway        bool   `json:"is_gateway"`
+	AgentOnly        bool   `json:"agent_only"`
+	CreatedAt        int64  `json:"created_at"`
+	FirmwareTarget   string `json:"firmware_target,omitempty"`
+	SnmpEnabled      bool   `json:"snmp_enabled"`
+	SnmpCommunitySet bool   `json:"snmp_community_set"`
+	SnmpPort         int    `json:"snmp_port,omitempty"`
+	SnmpPollInterval int    `json:"snmp_poll_interval,omitempty"`
+	Disabled         bool   `json:"disabled"`
+	ConsolePolling   bool   `json:"console_polling"`
+	SSHPort          int    `json:"ssh_port,omitempty"`
+	TempThreshold    *int   `json:"temp_threshold,omitempty"`
+}
+
+func newRouterListItem(rt adapters.RouterConfig) routerListItem {
+	return routerListItem{
+		ID:               rt.ID,
+		Name:             rt.Name,
+		Host:             rt.Host,
+		Type:             rt.Type,
+		IsGateway:        rt.IsGateway,
+		AgentOnly:        rt.AgentOnly,
+		CreatedAt:        rt.CreatedAt,
+		FirmwareTarget:   rt.FirmwareTarget,
+		SnmpEnabled:      rt.SnmpEnabled,
+		SnmpCommunitySet: rt.SnmpCommunity != "",
+		SnmpPort:         rt.SnmpPort,
+		SnmpPollInterval: rt.SnmpPollInterval,
+		Disabled:         rt.Disabled,
+		ConsolePolling:   rt.ConsolePolling,
+		SSHPort:          rt.SSHPort,
+		TempThreshold:    rt.TempThreshold,
+	}
+}
+
 // GET /api/config/routers — lista configurada (no el estado sondeado).
 func (s *server) handleListConfigRouters(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"routers": routerstore.ListRouters(s.db.DB)})
+	routers := routerstore.ListRouters(s.db.DB)
+	items := make([]routerListItem, 0, len(routers))
+	for _, rt := range routers {
+		items = append(items, newRouterListItem(rt))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"routers": items})
 }
 
 type routerInput struct {
@@ -105,9 +153,9 @@ type routerInput struct {
 	// FirmwareTarget: versión objetivo del firmware (issue #241; opcional).
 	FirmwareTarget *string `json:"firmware_target"`
 	// SNMP (issue #309): credenciales para sondeo SNMP del switch gestionado.
-	SnmpEnabled      *bool   `json:"snmp_enabled"`
+	SnmpEnabled *bool `json:"snmp_enabled"`
 	// ConsolePolling (issue #863): sondeo HTTP de la consola del switch.
-	ConsolePolling *bool `json:"console_polling"`
+	ConsolePolling   *bool   `json:"console_polling"`
 	SnmpCommunity    *string `json:"snmp_community"`
 	SnmpPort         *int    `json:"snmp_port"`
 	SnmpPollInterval *int    `json:"snmp_poll_interval"` // issue #414; segundos
@@ -117,10 +165,6 @@ type routerInput struct {
 	// TempThreshold (issue #716): umbral de alerta por temperatura alta (°C).
 	// Ausente = no tocar; 0 = reset a default (65); 1..150 = fijar.
 	TempThreshold *int `json:"temp_threshold"`
-	// RouterOS: credenciales de la REST API nativa (Type "routeros").
-	RouterOSUser     *string `json:"routeros_user"`
-	RouterOSPassword *string `json:"routeros_password"`
-	RouterOSInsecure *bool   `json:"routeros_insecure"`
 }
 
 // validateHost replica hostSchema (trim, 1..253, regex). Devuelve el valor
@@ -198,8 +242,8 @@ func (s *server) handleAddConfigRouter(w http.ResponseWriter, r *http.Request) {
 	if typ == "" {
 		typ = "openwrt"
 	}
-	if typ != "glinet" && typ != "openwrt" && typ != "routeros" && typ != "managed-switch" && typ != "external" && typ != "asuswrt" {
-		writeError(w, http.StatusBadRequest, "invalid_input", "Invalid enum value. Expected 'glinet' | 'openwrt' | 'routeros' | 'managed-switch' | 'external' | 'asuswrt'")
+	if typ != "glinet" && typ != "openwrt" && typ != "managed-switch" && typ != "external" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "Invalid enum value. Expected 'glinet' | 'openwrt' | 'managed-switch' | 'external'")
 		return
 	}
 	var firmwareTarget string
@@ -245,31 +289,18 @@ func (s *server) handleAddConfigRouter(w http.ResponseWriter, r *http.Request) {
 		}
 		sshPort = p
 	}
-	routerosUser := ""
-	if in.RouterOSUser != nil {
-		routerosUser = strings.TrimSpace(*in.RouterOSUser)
-	}
-	routerosPassword := ""
-	if in.RouterOSPassword != nil {
-		routerosPassword = *in.RouterOSPassword
-	}
-	routerosInsecure := false
-	if in.RouterOSInsecure != nil {
-		routerosInsecure = *in.RouterOSInsecure
-	}
 	created, err := routerstore.AddRouter(s.db.DB, routerstore.AddInput{
 		Name: name, Host: host, Type: typ, IsGateway: in.Gateway, AgentOnly: in.AgentOnly,
 		FirmwareTarget: firmwareTarget,
 		SnmpEnabled:    snmpEnabled, SnmpCommunity: snmpCommunity, SnmpPort: snmpPort, SnmpPollInterval: snmpInterval,
-		SSHPort:        sshPort,
-		RouterOSUser:   routerosUser, RouterOSPassword: routerosPassword, RouterOSInsecure: routerosInsecure,
+		SSHPort: sshPort,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	s.syncRouters()
-	writeJSON(w, http.StatusCreated, map[string]any{"router": created})
+	writeJSON(w, http.StatusCreated, map[string]any{"router": newRouterListItem(created)})
 }
 
 // DELETE /api/config/routers/:id — 204 o 404.
@@ -350,8 +381,8 @@ func (s *server) handleUpdateConfigRouter(w http.ResponseWriter, r *http.Request
 	var typ *string
 	if in.Type != "" {
 		t := in.Type
-		if t != "glinet" && t != "openwrt" && t != "routeros" && t != "managed-switch" && t != "external" && t != "asuswrt" {
-			writeError(w, http.StatusBadRequest, "invalid_input", "Invalid enum value. Expected 'glinet' | 'openwrt' | 'routeros' | 'managed-switch' | 'external' | 'asuswrt'")
+		if t != "glinet" && t != "openwrt" && t != "managed-switch" && t != "external" {
+			writeError(w, http.StatusBadRequest, "invalid_input", "Invalid enum value. Expected 'glinet' | 'openwrt' | 'managed-switch' | 'external'")
 			return
 		}
 		typ = &t
@@ -404,11 +435,6 @@ func (s *server) handleUpdateConfigRouter(w http.ResponseWriter, r *http.Request
 		}
 		tempThreshold = &v
 	}
-	var routerosUser *string
-	if in.RouterOSUser != nil {
-		v := strings.TrimSpace(*in.RouterOSUser)
-		routerosUser = &v
-	}
 	updated, ok := routerstore.UpdateRouter(s.db.DB, id, routerstore.UpdateInput{
 		Name: name, Host: host, Type: typ,
 		IsGateway: &gw, AgentOnly: &ao,
@@ -418,14 +444,13 @@ func (s *server) handleUpdateConfigRouter(w http.ResponseWriter, r *http.Request
 		SSHPort:        sshPort,
 		TempThreshold:  tempThreshold,
 		ConsolePolling: in.ConsolePolling,
-		RouterOSUser:   routerosUser, RouterOSPassword: in.RouterOSPassword, RouterOSInsecure: in.RouterOSInsecure,
 	})
 	if !ok {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	s.syncRouters()
-	writeJSON(w, http.StatusOK, map[string]any{"router": updated})
+	writeJSON(w, http.StatusOK, map[string]any{"router": newRouterListItem(updated)})
 }
 
 // --- AdGuard Home (GL.iNet) — solo admin; la contraseña NO se devuelve ---
@@ -579,10 +604,11 @@ func (s *server) handleDeleteAdguardConfig(w http.ResponseWriter, r *http.Reques
 func (s *server) handleGetProxmoxConfig(w http.ResponseWriter, r *http.Request) {
 	instances := pve.LoadInstances(s.db.DB)
 	// Vista sanitizada: el secret JAMAS sale del server (#764).
-	view := make([]map[string]string, 0, len(instances))
+	view := make([]map[string]any, 0, len(instances))
 	for _, in := range instances {
-		view = append(view, map[string]string{
+		view = append(view, map[string]any{
 			"id": in.ID, "name": in.Name, "url": in.URL, "tokenId": in.TokenID,
+			"caPem": in.CAPEM, "fingerprintSha256": in.FingerprintSHA256, "insecure": in.Insecure,
 		})
 	}
 	out := map[string]any{
@@ -606,11 +632,14 @@ type proxmoxInput struct {
 }
 
 type proxmoxInstanceInput struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	TokenID string `json:"tokenId"`
-	Secret  string `json:"secret"` // vacío en edición = conservar el actual
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	URL               string  `json:"url"`
+	TokenID           string  `json:"tokenId"`
+	Secret            string  `json:"secret"` // vacío en edición = conservar el actual
+	CAPEM             *string `json:"caPem"`
+	FingerprintSHA256 *string `json:"fingerprintSha256"`
+	Insecure          *bool   `json:"insecure"`
 }
 
 // PUT /api/config/proxmox - upsert de UNA instancia multi (#764): body
@@ -652,7 +681,8 @@ func (s *server) handlePutProxmoxConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if current != nil {
-		if url == "" && tokenID == "" && strings.TrimSpace(in.Name) == "" && in.Secret == "" {
+		if url == "" && tokenID == "" && strings.TrimSpace(in.Name) == "" && in.Secret == "" &&
+			in.CAPEM == nil && in.FingerprintSHA256 == nil && in.Insecure == nil {
 			writeError(w, http.StatusBadRequest, "invalid_input", "nada que actualizar")
 			return
 		}
@@ -664,6 +694,15 @@ func (s *server) handlePutProxmoxConfig(w http.ResponseWriter, r *http.Request) 
 		}
 		if in.Secret != "" {
 			current.Secret = in.Secret
+		}
+		if in.CAPEM != nil {
+			current.CAPEM = strings.TrimSpace(*in.CAPEM)
+		}
+		if in.FingerprintSHA256 != nil {
+			current.FingerprintSHA256 = strings.TrimSpace(*in.FingerprintSHA256)
+		}
+		if in.Insecure != nil {
+			current.Insecure = *in.Insecure
 		}
 		if n := strings.TrimSpace(in.Name); n != "" {
 			current.Name = n
@@ -684,7 +723,17 @@ func (s *server) handlePutProxmoxConfig(w http.ResponseWriter, r *http.Request) 
 	if name == "" {
 		name = id
 	}
-	inst := pve.Instance{ID: id, Name: name, Config: pve.Config{URL: url, TokenID: tokenID, Secret: in.Secret}}
+	cfg := pve.Config{URL: url, TokenID: tokenID, Secret: in.Secret}
+	if in.CAPEM != nil {
+		cfg.CAPEM = strings.TrimSpace(*in.CAPEM)
+	}
+	if in.FingerprintSHA256 != nil {
+		cfg.FingerprintSHA256 = strings.TrimSpace(*in.FingerprintSHA256)
+	}
+	if in.Insecure != nil {
+		cfg.Insecure = *in.Insecure
+	}
+	inst := pve.Instance{ID: id, Name: name, Config: cfg}
 	if err := pve.UpsertInstance(s.db.DB, inst); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
 		return
@@ -738,6 +787,15 @@ func (s *server) handleTestProxmoxConfig(w http.ResponseWriter, r *http.Request)
 	}
 	if in.Secret != "" {
 		cfg.Secret = in.Secret
+	}
+	if in.CAPEM != nil {
+		cfg.CAPEM = strings.TrimSpace(*in.CAPEM)
+	}
+	if in.FingerprintSHA256 != nil {
+		cfg.FingerprintSHA256 = strings.TrimSpace(*in.FingerprintSHA256)
+	}
+	if in.Insecure != nil {
+		cfg.Insecure = *in.Insecure
 	}
 	if !cfg.Enabled() {
 		writeError(w, http.StatusBadRequest, "invalid_input", "faltan url, tokenId o secret")

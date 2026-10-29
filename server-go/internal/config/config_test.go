@@ -4,6 +4,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -130,6 +132,33 @@ func TestLoadTLSEnumInvalido(t *testing.T) {
 	_, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_TLS_ENABLED": "2"}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "NETPULSE_TLS_ENABLED") {
 		t.Fatalf("NETPULSE_TLS_ENABLED=2 debe fallar señalando la variable: %v", err)
+	}
+}
+
+func TestLoadAllowInsecureAgentCommands(t *testing.T) {
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AllowInsecureAgentCommands {
+		t.Fatal("la válvula debe estar cerrada por defecto")
+	}
+
+	cfg, err = Load(map[string]string{
+		"AUTH_PASS": "segura-y-larga", "NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS": "1",
+	}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.AllowInsecureAgentCommands {
+		t.Fatal("NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS=1 debe activar la válvula")
+	}
+
+	_, err = Load(map[string]string{
+		"AUTH_PASS": "segura-y-larga", "NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS": "2",
+	}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS") {
+		t.Fatalf("un valor inválido debe fallar señalando la variable: %v", err)
 	}
 }
 
@@ -281,5 +310,133 @@ func TestLoadAutoReinstallConAgentURL(t *testing.T) {
 	}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "NETPULSE_PUBLIC_URL") {
 		t.Fatalf("AUTO_REINSTALL sin ninguna URL debe fallar señalando el par: %v", err)
+	}
+}
+
+func writeTestDB(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "netpulse.db"), []byte("sqlite"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+func TestLoadBindAddrLoopbackByDefault(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindAddr != "127.0.0.1" {
+		t.Fatalf("BindAddr = %q, esperaba loopback sin TLS", cfg.BindAddr)
+	}
+	if mode := readBindMode(filepath.Join(root, "data", bindModeFile)); mode != bindModeLoopback {
+		t.Fatalf("bind mode = %q, esperaba %q", mode, bindModeLoopback)
+	}
+}
+
+func TestLoadBindAddrFreshInstallStaysLoopbackAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root); err != nil {
+		t.Fatalf("Load inicial: %v", err)
+	}
+	writeTestDB(t, root)
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root)
+	if err != nil {
+		t.Fatalf("Load tras crear la base: %v", err)
+	}
+	if cfg.BindAddr != "127.0.0.1" {
+		t.Fatalf("BindAddr = %q, una instalación nueva debe seguir en loopback tras reiniciar", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrOverride(t *testing.T) {
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_BIND": "0.0.0.0"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindAddr != "0.0.0.0" {
+		t.Fatalf("BindAddr = %q, esperaba 0.0.0.0", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrExplicitWinsOverStoredMode(t *testing.T) {
+	root := t.TempDir()
+	writeTestDB(t, root)
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_BIND": "127.0.0.1"}, root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindAddr != "127.0.0.1" {
+		t.Fatalf("BindAddr = %q, NETPULSE_BIND debe mandar sobre el modo guardado", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrTLSKeepsAllInterfaces(t *testing.T) {
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_TLS_ENABLED": "1"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindAddr != "" {
+		t.Fatalf("BindAddr = %q, esperaba vacío con TLS", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrTLSKeepsFreshMode(t *testing.T) {
+	root := t.TempDir()
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_TLS_ENABLED": "1"}, root)
+	if err != nil {
+		t.Fatalf("Load con TLS: %v", err)
+	}
+	if cfg.BindAddr != "" {
+		t.Fatalf("BindAddr = %q, esperaba vacío con TLS", cfg.BindAddr)
+	}
+	writeTestDB(t, root)
+	cfg, err = Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root)
+	if err != nil {
+		t.Fatalf("Load sin TLS: %v", err)
+	}
+	if cfg.BindAddr != "127.0.0.1" {
+		t.Fatalf("BindAddr = %q, una instalación nueva debe volver a loopback al desactivar TLS", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrExistingInstallKeepsAllInterfaces(t *testing.T) {
+	root := t.TempDir()
+	writeTestDB(t, root)
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.BindAddr != "" {
+		t.Fatalf("BindAddr = %q, esperaba vacío cuando ya existe la base de datos", cfg.BindAddr)
+	}
+	if mode := readBindMode(filepath.Join(root, "data", bindModeFile)); mode != bindModeLAN {
+		t.Fatalf("bind mode = %q, esperaba %q", mode, bindModeLAN)
+	}
+}
+
+func TestLoadBindAddrLegacyInstallStaysOpenAfterRestart(t *testing.T) {
+	root := t.TempDir()
+	writeTestDB(t, root)
+	if _, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root); err != nil {
+		t.Fatalf("Load inicial: %v", err)
+	}
+	cfg, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga"}, root)
+	if err != nil {
+		t.Fatalf("Load tras reiniciar: %v", err)
+	}
+	if cfg.BindAddr != "" {
+		t.Fatalf("BindAddr = %q, una actualización debe conservar todas las interfaces", cfg.BindAddr)
+	}
+}
+
+func TestLoadBindAddrInvalido(t *testing.T) {
+	_, err := Load(map[string]string{"AUTH_PASS": "segura-y-larga", "NETPULSE_BIND": "not-an-ip"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "NETPULSE_BIND") {
+		t.Fatalf("NETPULSE_BIND inválido debe fallar señalando la variable: %v", err)
 	}
 }

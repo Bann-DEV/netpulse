@@ -40,7 +40,11 @@ type Options struct {
 	Slug         string // slug del equipo (agent.token.<slug> en el servidor)
 	ServerFP     string // SHA-256 del SPKI del servidor en hex (https obligatorio)
 	PairingToken string // modo bootstrap: pairing una vez y salir
-	Interval     time.Duration
+	// AllowInsecureCommands permite aceptar comandos privilegiados por HTTP
+	// (NETPULSE_ALLOW_INSECURE_COMMANDS=1). Solo para la transicion a HTTPS:
+	// el valor por defecto los rechaza y deja el agente reportando.
+	AllowInsecureCommands bool
+	Interval              time.Duration
 	// ScanInterval: mínimo entre scans de vecinos del prober (#699). 0 =
 	// probe.DefaultScanInterval; probe.ScanDisabled = sin scans periódicos
 	// (env NETPULSE_SCAN_INTERVAL, "0" lo desactiva).
@@ -209,6 +213,35 @@ func Run(ctx context.Context, opts Options) error {
 	// SSE bidireccional: el servidor envía comandos al agente. Reutiliza el
 	// mismo transporte (mismo pinning SPKI que el push).
 	refreshCh := make(chan struct{}, 1)
+	commandCh := make(chan func(), 16)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case fn := <-commandCh:
+				fn()
+			}
+		}
+	}()
+	enqueue := func(fn func()) {
+		select {
+		case commandCh <- fn:
+		case <-ctx.Done():
+		}
+	}
+	privilegedErr := privilegedEventAllowed(opts.Server, opts.AllowInsecureCommands)
+	if privilegedErr != nil {
+		log.Warn("[netpulse-agent] comandos privilegiados deshabilitados", "err", privilegedErr)
+	}
+	enqueuePrivileged := func(event string, fn func()) {
+		if privilegedErr != nil {
+			log.Warn("[netpulse-agent] comando privilegiado rechazado",
+				"event", event, "err", privilegedErr)
+			return
+		}
+		enqueue(fn)
+	}
 	go func() {
 		sse := sseclient.New(opts.Server, opts.Slug, opts.Token,
 			&http.Client{Timeout: 0, Transport: transport},
@@ -220,24 +253,32 @@ func Run(ctx context.Context, opts Options) error {
 					}
 				}
 				if ev.Name == "apply" && ev.Data != "" {
-					go a.handleApply(ex, transport, ev.Data)
+					data := ev.Data
+					enqueuePrivileged("apply", func() { a.handleApply(ex, transport, data) })
 				}
 				if ev.Name == "upgrade" {
-					if opts.OnUpgrade != nil {
-						go opts.OnUpgrade(ev.Data)
-					} else {
-						go handleUpgrade(opts, transport, ev.Data)
-					}
+					data := ev.Data
+					enqueuePrivileged("upgrade", func() {
+						if opts.OnUpgrade != nil {
+							opts.OnUpgrade(data)
+						} else {
+							handleUpgrade(opts, transport, data)
+						}
+					})
 				}
 				if ev.Name == "firmware_upgrade" && ev.Data != "" {
-					go handleFirmwareUpgrade(opts, transport, ev.Data)
+					data := ev.Data
+					enqueuePrivileged("firmware_upgrade", func() { handleFirmwareUpgrade(opts, transport, data) })
 				}
 				if ev.Name == "config_backup" {
-					if opts.OnConfigBackup != nil {
-						go opts.OnConfigBackup(ev.Data)
-					} else {
-						go handleConfigBackup(opts, transport)
-					}
+					data := ev.Data
+					enqueuePrivileged("config_backup", func() {
+						if opts.OnConfigBackup != nil {
+							opts.OnConfigBackup(data)
+						} else {
+							handleConfigBackup(opts, transport)
+						}
+					})
 				}
 				log.Debug("[netpulse-agent] SSE evento", "event", ev.Name)
 			})

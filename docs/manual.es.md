@@ -36,6 +36,10 @@ NetPulse es multiusuario con autenticación por contraseña. El instalador impri
 
 Existe además un **modo demo** que se puede abrir sin contraseña ni backend: muestra una red de ejemplo con decenas de dispositivos para explorar la interfaz. En demo no hay datos reales y las funciones de escritura quedan deshabilitadas.
 
+### Seguridad del transporte
+
+Cuando no hay TLS ni HTTPS on-box, el servidor escucha en `127.0.0.1` por defecto. Una instalación nueva no acepta inicios de sesión desde la LAN. Usa `NETPULSE_BIND=0.0.0.0` solo si quieres exponerlo a propósito, y activa TLS (`NETPULSE_TLS_ENABLED=1`) para cualquier acceso remoto. Con TLS u HTTPS on-box el bind queda abierto salvo que `NETPULSE_BIND` indique otra cosa. Una instalación que ya tiene su base de datos conserva el listener abierto en todas las interfaces, de modo que actualizar no corta el acceso. La decisión se guarda en `data/.bind-mode`, así que reiniciar una instalación nueva no la abre a la LAN, y el instalador escribe `NETPULSE_BIND=127.0.0.1` en el fichero de entorno nuevo.
+
 ---
 
 ## Resumen
@@ -135,6 +139,19 @@ Para routers a los que el servidor no puede acceder por SSH, usa el **token de e
 1. En **Dispositivos**, si hay agentes desactualizados verás un aviso con el número.
 2. Pulsa **Actualizar agentes** y confirma.
 3. Sigue el panel de progreso: por cada agente verás el estado (esperando, descargando, instalando, actualizado o sin respuesta). Un agente que no responde en unos segundos requiere reinstalación manual.
+
+### Seguridad del transporte del agente
+
+Los comandos privilegiados del agente (aplicar, actualizar, actualizar firmware y copia de configuración) exigen que el agente llegue al servidor por HTTPS. Si el agente reporta por HTTP en claro, el servidor rechaza el comando con `insecure_agent_transport` y lo deja en cola o pendiente en lugar de enviarlo sin cifrar.
+
+El agente también rechaza los eventos SSE privilegiados cuando `NETPULSE_SERVER` no es HTTPS. Durante una migración a HTTPS, dos variables de entorno abren una excepción temporal:
+
+- `NETPULSE_ALLOW_INSECURE_COMMANDS=1` en el agente.
+- `NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS=1` en el servidor.
+
+Úsalas solo mientras mueves la flota a HTTPS y retíralas después. Las actualizaciones de binario exigen siempre la cabecera `X-Checksum-Sha256`: tanto la actualización del agente como el self-heal descartan el binario si falta la cabecera o el digest no coincide.
+
+El self-heal del init aplica la misma política de transporte: solo descarga el binario si `NETPULSE_SERVER` es HTTPS o si `NETPULSE_ALLOW_INSECURE_COMMANDS=1`. Sin esa válvula, un agente HTTP al que le falta el binario no se auto-repara y registra el rechazo. Es preferible a ejecutar un binario descargado por un canal no autenticado.
 
 ---
 
@@ -371,6 +388,8 @@ Por cada router, una tarjeta por radio WiFi con el **canal actual**, el **canal 
 
 El plan se calcula con los **scans de vecinos** de cada radio. Aquí hay una diferencia clave: los routers que corren el panel **NetGrip** (el gateway y los APs gestionados por su panel) **no escanean vecinos**; los routers con el **agente NetPulse** sí. Por eso a veces un router no muestra recomendación.
 
+Desde el agente 3.0.25 el sondeo periódico viene **desactivado** (`NETPULSE_SCAN_INTERVAL=0` en `/etc/netpulse-agent.env`): el `iw scan` saca la radio de su canal 2-4 s y algunos clientes sensibles a los beacons (ESP8266/ESP32, altavoces Cast) se desasocian en esa ventana (ver #1557). Los vecinos se refrescan al abrir esta página si los datos tienen más de 6 horas (un scan por radio física, con 5 minutos de margen entre peticiones) y con el botón **Escanear ahora**. Para volver al sondeo periódico, pon `NETPULSE_SCAN_INTERVAL=30m` (o el intervalo que quieras) en `/etc/netpulse-agent.env` y reinicia el agente.
+
 ### Cómo leerlo
 
 - **Canal actual** en grande, **canal recomendado** resaltado si es distinto.
@@ -538,8 +557,9 @@ Es la pantalla más grande. Secciones principales:
 - **Overrides de topología** y **Dispositivos de confianza** (solo admin).
 - **Adopción de agentes**: token de emparejamiento y huella del servidor.
 - **AdGuard Home**: configuración de la conexión de solo lectura al panel AdGuard del router.
+- **Proxmox VE**: inventario de solo lectura del cluster. Además de la URL y el token, puedes pegar un certificado de la CA, fijar una huella SHA-256 o activar un modo inseguro explícito para un host autofirmado de confianza.
 - **Mi perfil**: nombre, idioma, contraseña y salir.
-- **API Tokens**: tokens bearer para integraciones.
+- **API Tokens**: tokens bearer para integraciones. Un token `read` solo permite `GET`, `HEAD` y `OPTIONS`, un token `write` puede además mutar recursos que no son de administración, y solo un token `admin` alcanza las rutas de administración y la descarga de la base de datos.
 - **Acerca de**: versión, enlaces, push/PWA, Telegram y datos del sistema.
 
 ### Decisiones de diseño
@@ -621,7 +641,7 @@ Los umbrales de temperatura, señal y latencia que definen la salud y las alerta
 
 ### Procedimiento: activarlo
 
-La forma habitual es la **tarjeta MQTT de Ajustes**: la activas, pones host, puerto y credenciales, pruebas la conexión y guardas; se aplica en caliente, sin reiniciar. Desde esa misma tarjeta puedes **propagar la configuración a los routers NetGrip** de la flota, para no configurarlos uno a uno.
+La forma habitual es la **tarjeta MQTT de Ajustes**: la activas, pones host, puerto y credenciales, pruebas la conexión y guardas; se aplica en caliente, sin reiniciar. Desde esa misma tarjeta puedes **propagar la configuración a los routers NetGrip** de la flota, para no configurarlos uno a uno. La propagación crea un plan por router y al agente solo se le deja **encolado**: la tarjeta lo marca como pendiente de confirmación y el resultado real (aplicado o fallido) se ve en Orquestación cuando el agente lo reporta.
 
 La alternativa son las variables de entorno (o las opciones UCI `mqtt_*` en modo on-box):
 

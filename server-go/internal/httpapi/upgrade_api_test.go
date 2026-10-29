@@ -40,6 +40,11 @@ type upgradeTestServer struct {
 // kv, como producción). El AgentHub habilita stream/refresh/upgrade.
 func makeUpgradeTestServer(t *testing.T) *upgradeTestServer {
 	t.Helper()
+	return makeUpgradeTestServerWithOptions(t, true)
+}
+
+func makeUpgradeTestServerWithOptions(t *testing.T, allowInsecure bool) *upgradeTestServer {
+	t.Helper()
 	auth.SetTrustProxy(true)
 	t.Cleanup(func() { auth.SetTrustProxy(false) })
 	dataDir := t.TempDir()
@@ -73,6 +78,7 @@ func makeUpgradeTestServer(t *testing.T) *upgradeTestServer {
 		sum := sha256.Sum256([]byte(token))
 		return subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(stored)) == 1
 	})
+	hub.SetAllowInsecureCommands(allowInsecure)
 	handler := httpapi.NewHandler(httpapi.Deps{
 		Config: cfg, DB: d, Adapter: adapters.NewDemo(),
 		Hub:    sse.NewHub(d, cfg.MaxSSEClients, func() any { return nil }),
@@ -154,9 +160,17 @@ func upgradePayload(version string) string {
 	return upgradePayloadFor("patio", version)
 }
 
+func upgradePayloadAt(version string, ts int64) string {
+	return upgradePayloadForAt("patio", version, ts)
+}
+
 // upgradePayloadFor: igual que upgradePayload pero para un router arbitrario.
 func upgradePayloadFor(router, version string) string {
-	return fmt.Sprintf(`{"router":%q,"ts":%d,"version":%q,"data":{"system":{"sysinfo":{"uptime":100,"load":[0,0,0],"memory":{"total":100,"free":50,"buffered":0,"available":50}},"cpu":10,"temp":40},"wireless":{"clients":{}},"dhcp":{"leases":[]},"fdb":{"macs":{}}}}`, router, time.Now().Unix(), version)
+	return upgradePayloadForAt(router, version, time.Now().Unix())
+}
+
+func upgradePayloadForAt(router, version string, ts int64) string {
+	return fmt.Sprintf(`{"router":%q,"ts":%d,"version":%q,"data":{"system":{"sysinfo":{"uptime":100,"load":[0,0,0],"memory":{"total":100,"free":50,"buffered":0,"available":50}},"cpu":10,"temp":40},"wireless":{"clients":{}},"dhcp":{"leases":[]},"fdb":{"macs":{}}}}`, router, ts, version)
 }
 
 // openStream registra una conexión SSE falsa del agente en el hub usando un
@@ -269,6 +283,22 @@ func TestUpgradeConectado202(t *testing.T) {
 	<-done
 }
 
+func TestUpgradeRejectsHTTPTransportWithoutOptIn(t *testing.T) {
+	ts := makeUpgradeTestServerWithOptions(t, false)
+	st, tok := createUpgradeToken(t, ts, "patio")
+	if st != 201 || tok == "" {
+		t.Fatalf("create: %d", st)
+	}
+	cancel, done := openStream(t, ts, "patio", tok)
+
+	status, body := postUpgrade(t, ts, "patio", ts.cookie)
+	if status != 409 || body["error"] != "insecure_agent_transport" {
+		t.Fatalf("http sin opt-in: got %d %v", status, body)
+	}
+	cancel()
+	<-done
+}
+
 func TestUpgradeResultBearer(t *testing.T) {
 	ts := makeUpgradeTestServer(t)
 	st, tok := createUpgradeToken(t, ts, "patio")
@@ -335,21 +365,22 @@ func TestAgentsListUpdateAvailable(t *testing.T) {
 		return nil
 	}
 
+	base := time.Now().Unix() + 60
 	// Push con versión == EmbeddedAgentVersion (0.1.0) → updateAvailable=false.
-	upgradeIngest(t, ts, tok, upgradePayload("0.1.0"))
+	upgradeIngest(t, ts, tok, upgradePayloadAt("0.1.0", base))
 	if patio := agentItem(); patio["updateAvailable"] != false {
 		t.Fatalf("versión 0.1.0 debe dar updateAvailable=false: %v", patio)
 	}
 
 	// Push con versión más vieja → updateAvailable=true.
-	upgradeIngest(t, ts, tok, upgradePayload("0.0.9"))
+	upgradeIngest(t, ts, tok, upgradePayloadAt("0.0.9", base+1))
 	if patio := agentItem(); patio["updateAvailable"] != true {
 		t.Fatalf("versión 0.0.9 debe dar updateAvailable=true: %v", patio)
 	}
 
 	// Push con versión MÁS NUEVA que la embebida → false (no se ofrece
 	// downgrade; antes cualquier versión distinta marcaba novedad, #447).
-	upgradeIngest(t, ts, tok, upgradePayload("9.9.9"))
+	upgradeIngest(t, ts, tok, upgradePayloadAt("9.9.9", base+2))
 	if patio := agentItem(); patio["updateAvailable"] != false {
 		t.Fatalf("versión 9.9.9 (más nueva) debe dar updateAvailable=false: %v", patio)
 	}
@@ -358,11 +389,11 @@ func TestAgentsListUpdateAvailable(t *testing.T) {
 	saved := agentbin.EmbeddedAgentVersion
 	t.Cleanup(func() { agentbin.EmbeddedAgentVersion = saved })
 	agentbin.EmbeddedAgentVersion = "2.25.0-443"
-	upgradeIngest(t, ts, tok, upgradePayload("2.25.0-437"))
+	upgradeIngest(t, ts, tok, upgradePayloadAt("2.25.0-437", base+3))
 	if patio := agentItem(); patio["updateAvailable"] != true {
 		t.Fatalf("2.25.0-437 contra embebido 2.25.0-443 debe dar updateAvailable=true: %v", patio)
 	}
-	upgradeIngest(t, ts, tok, upgradePayload("2.25.0-443"))
+	upgradeIngest(t, ts, tok, upgradePayloadAt("2.25.0-443", base+4))
 	if patio := agentItem(); patio["updateAvailable"] != false {
 		t.Fatalf("2.25.0-443 contra embebido 2.25.0-443 debe dar updateAvailable=false: %v", patio)
 	}

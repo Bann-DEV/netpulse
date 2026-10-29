@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS metrics (
   PRIMARY KEY (router_id, ts)
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_router_ts ON metrics(router_id, ts);
--- Escalera de retención (skill sqlite-timeseries-daemon): raw 7 días → buckets
+-- Escalera de retención: raw 7 días → buckets
 -- 5 min 1 año → daily ∞. El job nocturno hace el rollup en este orden; el
 -- endpoint de histórico sirve largo plazo desde estos niveles.
 CREATE TABLE IF NOT EXISTS metrics_buckets (
@@ -651,10 +651,12 @@ func Open(dataDir string, opts ...OpenOption) (*DB, error) {
 		}
 	}
 
-	// RouterOS (Type "routeros"): credenciales de la REST API nativa.
-	migrate(sqldb, "routers", "routeros_user", "ALTER TABLE routers ADD COLUMN routeros_user TEXT")
-	migrate(sqldb, "routers", "routeros_password", "ALTER TABLE routers ADD COLUMN routeros_password TEXT")
-	migrate(sqldb, "routers", "routeros_insecure", "ALTER TABLE routers ADD COLUMN routeros_insecure INTEGER NOT NULL DEFAULT 0")
+	// RouterOS and Asuswrt/Merlin moved to external integrations (#1574,
+	// #1579). Keep existing units visible until their owner deploys the
+	// pusher. Legacy credential columns remain in place as inert schema.
+	if _, err := sqldb.Exec(`UPDATE routers SET type = 'external', agent_only = 1 WHERE type IN ('routeros', 'asuswrt')`); err != nil {
+		log.Printf("[netpulse] aviso: no se pudieron migrar los routers RouterOS/Asuswrt a external: %v", err)
+	}
 
 	// #1129: las MACs de roam_events se ingirieron en minúsculas (así vienen
 	// en los logs hostapd/dawn/usteer) mientras el resto de la app canonicaliza
@@ -752,8 +754,8 @@ func (d *DB) Maintenance() {
 	}
 }
 
-// NightlyJob ejecuta el rollup de la escalera de retención (skill
-// sqlite-timeseries-daemon): samples→buckets (ventana = retención raw, 7d) →
+// NightlyJob ejecuta el rollup de la escalera de retención:
+// samples→buckets (ventana = retención raw, 7d) →
 // buckets→daily (solape 35 días) → checkpoint → optimize. Orden obligatorio:
 // agregar antes de purgar; idempotente (INSERT OR REPLACE) por si el daemon
 // estuvo caído.

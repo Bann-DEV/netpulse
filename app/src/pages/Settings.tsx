@@ -66,7 +66,7 @@ import { InfoTip } from '@/components/InfoTip'
 import { useNetPulse } from '@/data/DataProvider'
 import { fmtEs } from '@/data/mock'
 import { useAuth } from '@/data/AuthContext'
-import { getVapidKey, postPushSubscribe, postPushUnsubscribe, pushContext, urlBase64ToUint8Array } from '@/data/push'
+import { getVapidKey, postPushSubscribe, postPushUnsubscribe, pushContext, unsubscribeCurrentDevice, urlBase64ToUint8Array } from '@/data/push'
 import { useServicesVisibility } from '@/hooks/useServicesVisibility'
 import type { ServicesVisibility } from '@/hooks/useServicesVisibility'
 import { useIntegrations } from '@/hooks/useIntegrations'
@@ -357,7 +357,7 @@ function Confetti({ burstKey, reduce }: { burstKey: number; reduce: boolean }) {
 // Gestión de routers (modo live): CRUD contra /api/config/routers
 // ---------------------------------------------------------------------------
 
-type RouterType = 'glinet' | 'openwrt' | 'routeros' | 'managed-switch' | 'external' | 'asuswrt'
+type RouterType = 'glinet' | 'openwrt' | 'managed-switch' | 'external'
 
 interface ConfigRouter {
   id: string
@@ -369,17 +369,12 @@ interface ConfigRouter {
   disabled: boolean
   firmware_target: string
   snmp_enabled: boolean
-  snmp_community: string
+  snmp_community_set: boolean
   snmp_port: number
   snmp_poll_interval: number
   ssh_port?: number
   temp_threshold?: number | null
   console_polling?: boolean
-  // RouterOS: routeros_user viaja tal cual; routeros_password NUNCA se
-  // devuelve (json:"-" en el server, igual que la clave SSH) — dejar el
-  // campo en blanco en el form de edición conserva la password existente.
-  routeros_user?: string
-  routeros_insecure?: boolean
 }
 
 interface DiscoverCandidate {
@@ -428,13 +423,12 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
   const [editSnmpEnabled, setEditSnmpEnabled] = useState(false)
   const [editConsolePolling, setEditConsolePolling] = useState(true)
   const [editSnmpCommunity, setEditSnmpCommunity] = useState('')
+  const [editSnmpCommunitySet, setEditSnmpCommunitySet] = useState(false)
+  const [editSnmpCommunityTouched, setEditSnmpCommunityTouched] = useState(false)
   const [editSnmpPort, setEditSnmpPort] = useState(161)
   const [editSnmpPollInterval, setEditSnmpPollInterval] = useState(60)
   const [editSshPort, setEditSshPort] = useState(22)
   const [editTempThreshold, setEditTempThreshold] = useState('')
-  const [editRouterOSUser, setEditRouterOSUser] = useState('')
-  const [editRouterOSPassword, setEditRouterOSPassword] = useState('')
-  const [editRouterOSInsecure, setEditRouterOSInsecure] = useState(false)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [pubkey, setPubkey] = useState<{ publicKey: string; fingerprint: string } | null>(null)
   const [copied, setCopied] = useState(false)
@@ -624,14 +618,13 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
     setEditFirmwareTarget(r.firmware_target ?? '')
     setEditSnmpEnabled(r.snmp_enabled ?? false)
     setEditConsolePolling(r.console_polling ?? true)
-    setEditSnmpCommunity(r.snmp_community ?? '')
+    setEditSnmpCommunity('')
+    setEditSnmpCommunitySet(r.snmp_community_set)
+    setEditSnmpCommunityTouched(false)
     setEditSnmpPort(r.snmp_port ?? 161)
     setEditSnmpPollInterval(r.snmp_poll_interval ?? 60)
     setEditSshPort(r.ssh_port ?? 22)
     setEditTempThreshold(r.temp_threshold != null ? String(r.temp_threshold) : '')
-    setEditRouterOSUser(r.routeros_user ?? '')
-    setEditRouterOSPassword('') // blank = conservar la password existente
-    setEditRouterOSInsecure(r.routeros_insecure ?? false)
     setError(null)
   }
 
@@ -653,15 +646,12 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
           disabled: editDisabled,
           firmware_target: editFirmwareTarget.trim(),
           snmp_enabled: editSnmpEnabled,
-          snmp_community: editSnmpCommunity.trim() || undefined,
+          snmp_community: editSnmpCommunityTouched ? editSnmpCommunity.trim() : undefined,
           snmp_port: editSnmpPort,
           snmp_poll_interval: editSnmpPollInterval,
           ssh_port: editSshPort,
           temp_threshold: editTempThreshold.trim() === '' ? 0 : Number(editTempThreshold),
           console_polling: editConsolePolling,
-          routeros_user: editType === 'routeros' ? editRouterOSUser.trim() : undefined,
-          routeros_password: editRouterOSPassword || undefined,
-          routeros_insecure: editType === 'routeros' ? editRouterOSInsecure : undefined,
         }),
       })
       if (res.status === 409) {
@@ -993,8 +983,6 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
             options={[
               { value: 'openwrt', label: 'OpenWrt' },
               { value: 'glinet', label: 'GL.iNet' },
-              { value: 'routeros', label: 'RouterOS' },
-              { value: 'asuswrt', label: 'Asuswrt' },
               { value: 'managed-switch', label: t('settings.routers.typeManaged') },
               { value: 'external', label: t('settings.routers.typeExternal') },
             ]}
@@ -1164,8 +1152,6 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
                   options={[
                     { value: 'openwrt', label: 'OpenWrt' },
                     { value: 'glinet', label: 'GL.iNet' },
-                    { value: 'routeros', label: 'RouterOS' },
-              { value: 'asuswrt', label: 'Asuswrt' },
                     { value: 'managed-switch', label: t('settings.routers.typeManaged') },
                     { value: 'external', label: t('settings.routers.typeExternal') },
                   ]}
@@ -1232,11 +1218,27 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
                           id="snmp-community"
                           type="text"
                           value={editSnmpCommunity}
-                          onChange={(e) => setEditSnmpCommunity(e.target.value)}
+                          onChange={(e) => { setEditSnmpCommunity(e.target.value); setEditSnmpCommunityTouched(true) }}
                           placeholder="public"
                           aria-label={t('settings.routers.snmpCommunity')}
                           className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
                         />
+                        {editSnmpCommunitySet && !editSnmpCommunityTouched && (
+                          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{t('settings.routers.snmpCommunityConfigured')}</span>
+                            <button
+                              type="button"
+                              className="text-primary underline"
+                              onClick={() => {
+                                setEditSnmpCommunity('')
+                                setEditSnmpCommunitySet(false)
+                                setEditSnmpCommunityTouched(true)
+                              }}
+                            >
+                              {t('settings.routers.snmpCommunityClear')}
+                            </button>
+                          </div>
+                        )}
                       </div>
                         <div>
                           <label htmlFor="snmp-port" className="mb-1 block text-caption font-medium uppercase tracking-[0.06em] text-text-muted">
@@ -1270,44 +1272,6 @@ function RoutersManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
                         </div>
                     </div>
                   )}
-                </div>
-              )}
-              {editType === 'routeros' && (
-                <div className="space-y-2.5 rounded-lg border border-border bg-canvas/50 p-3">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label htmlFor="routeros-user" className="mb-1 block text-caption font-medium uppercase tracking-[0.06em] text-text-muted">
-                        {t('settings.routers.routerosUser')}
-                      </label>
-                      <input
-                        id="routeros-user"
-                        type="text"
-                        value={editRouterOSUser}
-                        onChange={(e) => setEditRouterOSUser(e.target.value)}
-                        placeholder="admin"
-                        aria-label={t('settings.routers.routerosUser')}
-                        className="w-full rounded-lg border border-border bg-canvas px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="routeros-password" className="mb-1 block text-caption font-medium uppercase tracking-[0.06em] text-text-muted">
-                        {t('settings.routers.routerosPassword')}
-                      </label>
-                      <input
-                        id="routeros-password"
-                        type="password"
-                        value={editRouterOSPassword}
-                        onChange={(e) => setEditRouterOSPassword(e.target.value)}
-                        placeholder={t('settings.routers.routerosPasswordPlaceholder')}
-                        aria-label={t('settings.routers.routerosPassword')}
-                        className="w-full rounded-lg border border-border bg-canvas px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-text-secondary">
-                    <Switch checked={editRouterOSInsecure} onCheckedChange={setEditRouterOSInsecure} />
-                    {t('settings.routers.routerosInsecure')}
-                  </label>
                 </div>
               )}
               {error && <p className="text-caption text-danger">{error}</p>}
@@ -1997,6 +1961,9 @@ interface PveInstanceCfg {
   url: string
   tokenId: string
   secret?: string
+  caPem?: string
+  fingerprintSha256?: string
+  insecure?: boolean
 }
 
 function ProxmoxManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => void }) {
@@ -2051,6 +2018,9 @@ function ProxmoxManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
         name: editing.name.trim(),
         url: editing.url.trim(),
         tokenId: editing.tokenId.trim(),
+        caPem: editing.caPem?.trim() ?? '',
+        fingerprintSha256: editing.fingerprintSha256?.trim() ?? '',
+        insecure: editing.insecure === true,
       }
       if (editing.secret) body.secret = editing.secret
       const res = await fetch('/api/config/proxmox', {
@@ -2085,6 +2055,9 @@ function ProxmoxManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
     try {
       const body: Record<string, unknown> = {
         id: inst.id.trim(), url: inst.url.trim(), tokenId: inst.tokenId.trim(),
+        caPem: inst.caPem?.trim() ?? '',
+        fingerprintSha256: inst.fingerprintSha256?.trim() ?? '',
+        insecure: inst.insecure === true,
       }
       if (inst.secret) body.secret = inst.secret
       const res = await fetch('/api/config/proxmox/test', {
@@ -2127,7 +2100,10 @@ function ProxmoxManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
     }
   }
 
-  const empty = { id: '', name: '', url: '', tokenId: '', secret: '' }
+  const empty = {
+    id: '', name: '', url: '', tokenId: '', secret: '',
+    caPem: '', fingerprintSha256: '', insecure: false,
+  }
 
   // Detectar (#967): POST /api/config/proxmox/detect barre la /24 de los
   // hosts de la flota en dos fases (TCP :8006 masivo + confirmación TLS en
@@ -2235,6 +2211,34 @@ function ProxmoxManager({ reduce, onSaved }: { reduce: boolean; onSaved: () => v
               aria-label={t('settings.proxmox.url')}
               className="w-full rounded-lg border border-border bg-elevated px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
             />
+            <textarea
+              value={editing.caPem ?? ''}
+              onChange={(e) => setEditing({ ...editing, caPem: e.target.value })}
+              placeholder={t('settings.proxmox.caPemPlaceholder')}
+              aria-label={t('settings.proxmox.caPem')}
+              rows={3}
+              className="w-full resize-y rounded-lg border border-border bg-elevated px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+            />
+            <input
+              type="text"
+              value={editing.fingerprintSha256 ?? ''}
+              onChange={(e) => setEditing({ ...editing, fingerprintSha256: e.target.value })}
+              placeholder={t('settings.proxmox.fingerprintPlaceholder')}
+              aria-label={t('settings.proxmox.fingerprint')}
+              className="w-full rounded-lg border border-border bg-elevated px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-muted focus:border-accent focus:outline-none"
+            />
+            <label className="flex items-start gap-2 text-caption text-text-secondary">
+              <input
+                type="checkbox"
+                checked={editing.insecure === true}
+                onChange={(e) => setEditing({ ...editing, insecure: e.target.checked })}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>{t('settings.proxmox.insecure')}</span>
+            </label>
+            {editing.insecure === true && (
+              <p className="text-caption leading-relaxed text-warn">{t('settings.proxmox.insecureHint')}</p>
+            )}
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               <input
                 type="text"
@@ -5141,6 +5145,7 @@ export default function Settings() {
   const { devices, wan, isDemo, refresh: refreshOverview } = useNetPulse()
   const auth = useAuth()
   const [adminPanel, setAdminPanel] = useState<'users' | 'backups' | 'autoupdate' | null>(null)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
 
   // ——— Orquestación (issue #121): toggle opt-in en la AdminBar ———
   const [orchOn, setOrchOn] = useState(false)
@@ -6404,12 +6409,25 @@ export default function Settings() {
                     exitDemo()
                     return
                   }
-                  void fetch('/api/auth/logout', { method: 'POST' })
-                    .catch(() => undefined)
-                    .finally(() => {
+                  setLogoutError(null)
+                  void (async () => {
+                    // #1631 F-20: la suscripción push se retira antes de
+                    // revocar la cookie, porque la baja exige sesión válida.
+                    await unsubscribeCurrentDevice()
+                    try {
+                      const res = await fetch('/api/auth/logout', { method: 'POST' })
+                      if (!res.ok) {
+                        // #1631 F-19: no afirmar que la sesión terminó si el
+                        // servidor no revocó la cookie.
+                        setLogoutError(t('settings.session.logoutError'))
+                        return
+                      }
                       window.dispatchEvent(new Event('netpulse-unauthorized'))
                       window.location.assign('/login')
-                    })
+                    } catch {
+                      setLogoutError(t('settings.session.logoutError'))
+                    }
+                  })()
                 }}
                 className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 text-sm font-medium text-danger transition-colors duration-150 hover:bg-danger/15"
               >
@@ -6417,6 +6435,12 @@ export default function Settings() {
                 <span className="hidden sm:inline">{isDemo ? t('demo.exit') : t('settings.session.logout')}</span>
               </button>
             </div>
+
+            {logoutError && (
+              <p role="alert" className="mt-2 text-caption text-danger">
+                {logoutError}
+              </p>
+            )}
 
             {showPwdForm && !isDemo && (
               <form

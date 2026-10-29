@@ -3,7 +3,9 @@
 package reinstall_test
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,7 +50,8 @@ func TestScriptEnvDocumentsDefaults(t *testing.T) {
 	s := scriptForTest()
 	for _, want := range []string{
 		"# NETPULSE_INTERVAL=30",
-		"# NETPULSE_SCAN_INTERVAL=30m",
+		`# NETPULSE_SCAN_INTERVAL: "0" = sin scans periódicos`,
+		"NETPULSE_SCAN_INTERVAL=$SCAN_VALUE",
 		"# NETPULSE_WAN_TARGET=1.1.1.1",
 		"# NETPULSE_GW_TARGET=192.168.8.1",
 		"# NETPULSE_HEARTBEAT_FILE=/tmp/netpulse-agent.heartbeat",
@@ -91,7 +94,7 @@ func TestScriptPreservesUserVars(t *testing.T) {
 	s := scriptForTest()
 	for _, want := range []string{
 		`USER_VARS=$(grep -E '^NETPULSE_[A-Z0-9_]+=' "$ENV_FILE"`,
-		`grep -vE '^NETPULSE_(SERVER|SLUG|TOKEN|SERVER_FP|PAIRING_TOKEN|WAN_TARGET|GW_TARGET)='`,
+		`grep -vE '^NETPULSE_(SERVER|SLUG|TOKEN|SERVER_FP|PAIRING_TOKEN|WAN_TARGET|GW_TARGET|SCAN_INTERVAL)='`,
 		`printf '%s\n' "$USER_VARS" >> "$ENV_FILE"`,
 	} {
 		if !strings.Contains(s, want) {
@@ -251,6 +254,50 @@ func TestScriptEmptyDigestSkipsVerify(t *testing.T) {
 	}
 	if !strings.Contains(s, `if [ -n "$SHA256" ]; then`) {
 		t.Error("la verificación debe estar protegida contra digest vacío")
+	}
+}
+
+func TestScriptSelfHealVerifiesDigest(t *testing.T) {
+	s := reinstall.Script(
+		"r", strings.Repeat("b2", 32), "https://np.example.org", strings.Repeat("c1", 32),
+		map[string]string{"arm64": "x", "arm": "x", "amd64": "x"},
+	)
+	for _, want := range []string{
+		"x-checksum-sha256:",
+		`sha256sum "$tmp"`,
+		"self-heal: sin X-Checksum-Sha256 válido, binario descartado",
+		"self-heal: SHA-256 no coincide, binario descartado",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("init embebido sin %q en el self-heal", want)
+		}
+	}
+}
+
+func TestSelfHealRequiresHTTPSOrExplicitOptIn(t *testing.T) {
+	want := []string{
+		`[ "${NETPULSE_ALLOW_INSECURE_COMMANDS:-}" = "1" ]`,
+		"self-heal: HTTP sin NETPULSE_ALLOW_INSECURE_COMMANDS=1, binario no descargado",
+	}
+	generated := scriptForTest()
+	for _, w := range want {
+		if !strings.Contains(generated, w) {
+			t.Errorf("init generado sin guarda de transporte: falta %q", w)
+		}
+	}
+	for _, path := range []string{
+		"../../../agent/deploy/netpulse-agent.init",
+		"../../../install-agent.sh",
+	} {
+		b, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			t.Fatalf("leyendo %s: %v", path, err)
+		}
+		for _, w := range want {
+			if !strings.Contains(string(b), w) {
+				t.Errorf("%s sin guarda de transporte: falta %q", path, w)
+			}
+		}
 	}
 }
 

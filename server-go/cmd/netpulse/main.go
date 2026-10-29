@@ -118,6 +118,15 @@ func withSSEWriteTimeout(next http.Handler, long time.Duration) http.Handler {
 
 // newHTTPServer construye un http.Server con los timeouts comunes (issue #210).
 // Compartido entre el listener HTTP de PORT y el listener HTTPS adicional (#696).
+// listenAddr joins the configured bind address and port. An empty bind keeps
+// the historical all-interfaces listener.
+func listenAddr(bind string, port int) string {
+	if bind == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(bind, strconv.Itoa(port))
+}
+
 func newHTTPServer(addr string, h http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -492,6 +501,7 @@ func run() error {
 	agentHub := sse.NewAgentHub(func(slug, token string) bool {
 		return checkAgentToken(dbHandle, slug, token)
 	})
+	agentHub.SetAllowInsecureCommands(cfg.AllowInsecureAgentCommands)
 
 	// Scheduler de upgrades programados (#494): tick 30 s, reutiliza el motor
 	// compartido (firmware.Engine) del flujo manual vía el AgentHub.
@@ -750,33 +760,33 @@ func run() error {
 	}
 
 	handler := httpapi.NewHandler(httpapi.Deps{
-		Config:          cfg,
-		DB:              dbHandle,
-		Adapter:         adapter,
-		Hub:             hub,
-		Secret:          secret,
-		Static:          static,
-		Updater:         upd,
-		Agents:          agentReg,
-		Pool:            sshPool,
-		Rearmer:         arm,
-		AgentHub:        agentHub,
-		ServerFP:        serverFP,
-		ServerFPFunc:    serverFPFunc,
-		TLS:             tlsMgr,
-		Orchestr:        orchMgr,
-		MQTT:            mqttMgr,
-		TokenStore:      tokenStore,
-		CollectorReader: collReader,
-		WiFiSLE:         wifiSLE,
-		PathAnalysis:    pathStore,
-		ConfigBackup:    cfgBackup,
-		Firmware:        fwStore,
+		Config:           cfg,
+		DB:               dbHandle,
+		Adapter:          adapter,
+		Hub:              hub,
+		Secret:           secret,
+		Static:           static,
+		Updater:          upd,
+		Agents:           agentReg,
+		Pool:             sshPool,
+		Rearmer:          arm,
+		AgentHub:         agentHub,
+		ServerFP:         serverFP,
+		ServerFPFunc:     serverFPFunc,
+		TLS:              tlsMgr,
+		Orchestr:         orchMgr,
+		MQTT:             mqttMgr,
+		TokenStore:       tokenStore,
+		CollectorReader:  collReader,
+		WiFiSLE:          wifiSLE,
+		PathAnalysis:     pathStore,
+		ConfigBackup:     cfgBackup,
+		Firmware:         fwStore,
 		FirmwareReleases: fwReleases,
-		Speedtest:       stScheduler,
-		AlertEmitter:    adapter.AlertsEngine(),
-		ChannelPlan:     chPlan,
-		MCP:             mcpSrv,
+		Speedtest:        stScheduler,
+		AlertEmitter:     adapter.AlertsEngine(),
+		ChannelPlan:      chPlan,
+		MCP:              mcpSrv,
 		LastOverview: func() *adapters.Overview {
 			return p.LastOverview()
 		},
@@ -811,12 +821,12 @@ func run() error {
 	}
 	defer tlsMgr.Close()
 	// FORK: on the plain port, what the HTTP mode allows (a no-op in full).
-	srv := newHTTPServer(fmt.Sprintf(":%d", cfg.Port), withSSEWriteTimeout(tlsMgr.PlainHandler(handler), sseWriteTimeout))
+	srv := newHTTPServer(listenAddr(cfg.BindAddr, cfg.Port), withSSEWriteTimeout(tlsMgr.PlainHandler(handler), sseWriteTimeout))
 
 	// Listener HTTPS adicional (#696): mismo handler y timeouts que el HTTP.
 	var tlsSrv *http.Server
 	if extraTLSConf != nil {
-		tlsSrv = newHTTPServer(fmt.Sprintf(":%d", cfg.TLSPort), withSSEWriteTimeout(handler, sseWriteTimeout))
+		tlsSrv = newHTTPServer(listenAddr(cfg.BindAddr, cfg.TLSPort), withSSEWriteTimeout(handler, sseWriteTimeout))
 		tlsSrv.TLSConfig = extraTLSConf
 	}
 
@@ -830,13 +840,24 @@ func run() error {
 		log.Printf("[netpulse] ERROR: binarios de agente embebidos (%s) sin la versión %s: upgrades de agentes DESACTIVADOS hasta recompilar (#1246)", bad, agentbin.EmbeddedAgentVersion)
 		agentbin.SetEmbeddedMismatch(true)
 	}
+	fwScheduler.Start()
+	if fwReleases != nil {
+		fwReleases.Start()
+	}
 	go func() {
 		scheme := "http"
 		if cfg.Onbox {
 			scheme = "https"
 			srv.TLSConfig = tlsConf
 		}
-		log.Printf("[netpulse] v%s · modo %s · %s://localhost:%d", httpapi.Version, adapter.Mode(), scheme, cfg.Port)
+		listenHost := cfg.BindAddr
+		if listenHost == "" {
+			listenHost = "0.0.0.0"
+		}
+		log.Printf("[netpulse] v%s · modo %s · %s://%s:%d", httpapi.Version, adapter.Mode(), scheme, listenHost, cfg.Port)
+		if cfg.BindAddr == "127.0.0.1" || cfg.BindAddr == "localhost" {
+			log.Print("[netpulse] listener solo en loopback: la UI no responde desde la LAN (NETPULSE_BIND=0.0.0.0 para abrirla, o activa TLS)")
+		}
 		staticDesc := staticDir
 		if staticDesc == "" {
 			staticDesc = "(embed)"
@@ -847,10 +868,6 @@ func run() error {
 		p.Start()
 		mqttMgr.Start()
 		upd.Start()
-		go fwScheduler.Start()
-		if fwReleases != nil {
-			go fwReleases.Start()
-		}
 		if eventsCollector != nil {
 			eventsCollector.Start()
 		}

@@ -177,7 +177,7 @@ type Router struct {
 	// dispositivo ni entidades por router en ese caso. Ausente = no se
 	// expone (lo hace NetPulse).
 	SelfExpose *bool `json:"selfExpose,omitempty"`
-	// Type: "glinet"|"openwrt"|"routeros"|"managed-switch"|"external". El frontend lo usa
+	// Type: "glinet"|"openwrt"|"managed-switch"|"external". El frontend lo usa
 	// para NO ofrecer reinstall/upgrade de agentes en dispositivos que no usan
 	// el agente nativo (scrapers de switches, etc.).
 	Type   string `json:"type,omitempty"`
@@ -597,6 +597,18 @@ type SfpInfo struct {
 // EthPort es una boca ethernet ({id, label, up, speed?} + enriquecimiento de
 // vecino en el detalle: connectedTo/deviceMac/detail, SPEC §7.8 + contadores
 // por puerto #305: iface física, bytes/errores acumulados y rates + SFP #313).
+// PeerKind* son los valores del contrato PeerKind (EthPort) que el frontend
+// traduce (#1039). Un solo sitio de verdad: el consumidor TS los replica en
+// app/src/components/routers/routerExtras.ts.
+const (
+	PeerKindRouterLink     = "router-link"
+	PeerKindRouterLinkLLDP = "router-link-lldp"
+	PeerKindAPWiFi         = "ap-wifi"
+	PeerKindCurated        = "curated"
+	PeerKindMAC            = "mac"
+	PeerKindInferredSwitch = "inferred-switch"
+)
+
 type EthPort struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
@@ -622,8 +634,7 @@ type EthPort struct {
 	DeviceCount int `json:"deviceCount,omitempty"`
 	// PeerKind clasifica cómo se resolvió el par para que el CLIENTE
 	// traduzca las plantillas (#1039); "" = par nominal ya traducible tal
-	// cual (nombre/IP/alias). Valores: "router-link", "router-link-lldp",
-	// "ap-wifi", "curated", "inferred-switch".
+	// cual (nombre/IP/alias). Valores en las constantes PeerKind* de abajo.
 	PeerKind string `json:"peerKind,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	// Snmp indica que el puerto proviene de un switch gestionado por SNMP
@@ -949,7 +960,7 @@ type RouterConfig struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Host      string `json:"host"`
-	Type      string `json:"type"` // "glinet"|"openwrt"|"routeros"
+	Type      string `json:"type"` // "glinet"|"openwrt"|"managed-switch"|"external"
 	IsGateway bool   `json:"is_gateway"`
 	AgentOnly bool   `json:"agent_only"`
 	CreatedAt int64  `json:"created_at"` // epoch ms
@@ -979,12 +990,6 @@ type RouterConfig struct {
 	// de este router. NULL/ausente = DefaultTempThreshold (65). Un router que
 	// corre más caliente sube el suyo sin ocultar problemas en los más frescos.
 	TempThreshold *int `json:"temp_threshold,omitempty"`
-	// RouterOS: credenciales de la REST API nativa (Type "routeros"). User no
-	// es secreto; Password nunca se serializa de vuelta (json:"-"), igual que
-	// la clave privada ed25519 del servidor.
-	RouterOSUser     string `json:"routeros_user,omitempty"`
-	RouterOSPassword string `json:"-"`
-	RouterOSInsecure bool   `json:"routeros_insecure"` // acepta TLS autofirmado (RouterOS de fábrica)
 }
 
 // TempThresholdValue resuelve el umbral efectivo de temperatura alta (°C) de
