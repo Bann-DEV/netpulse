@@ -110,10 +110,18 @@ chmod 644 ` + caPath + `
 // envRewriteBlock regenera /etc/netpulse-agent.env con las vars gestionadas
 // actuales, conservando las NETPULSE_* del usuario (#851). Usa las vars de
 // entorno del script anfitrión: SERVER, SLUG, TOKEN y SERVER_FP.
+//
+// #1558: el env sale con NETPULSE_SCAN_INTERVAL=0 activo. El scan periódico
+// de vecinos saca la radio del canal y puede tirar clientes sensibles a
+// beacons (#1557); la vista de canales pide el scan bajo demanda (#1561). Un
+// valor que ya esté en el env gana, para no pisar un override manual (#851).
 func envRewriteBlock(targets WanTargets) string {
 	return `USER_VARS=""
+SCAN_VALUE="0"
 if [ -f "$ENV_FILE" ]; then
-	USER_VARS=$(grep -E '^NETPULSE_[A-Z0-9_]+=' "$ENV_FILE" | grep -vE '^NETPULSE_(SERVER|SLUG|TOKEN|SERVER_FP|PAIRING_TOKEN|WAN_TARGET|GW_TARGET)=') || true
+	prev_scan=$(grep -E '^NETPULSE_SCAN_INTERVAL=' "$ENV_FILE" | tail -n 1) || prev_scan=""
+	if [ -n "$prev_scan" ]; then SCAN_VALUE=${prev_scan#NETPULSE_SCAN_INTERVAL=}; fi
+	USER_VARS=$(grep -E '^NETPULSE_[A-Z0-9_]+=' "$ENV_FILE" | grep -vE '^NETPULSE_(SERVER|SLUG|TOKEN|SERVER_FP|PAIRING_TOKEN|WAN_TARGET|GW_TARGET|SCAN_INTERVAL)=') || true
 fi
 cat > "$ENV_FILE" <<EOF
 # netpulse-agent — config (generado por reinstall)
@@ -122,7 +130,9 @@ NETPULSE_SLUG=$SLUG
 NETPULSE_TOKEN=$TOKEN
 # NETPULSE_SERVER_FP=<sha256>    # pin SPKI del server (https); lo rellena el instalador
 # NETPULSE_INTERVAL=30           # segundos entre pushes
-# NETPULSE_SCAN_INTERVAL=30m     # min entre scans de vecinos; "0" = sin scans periódicos
+# NETPULSE_SCAN_INTERVAL: "0" = sin scans periódicos (bajo demanda desde
+# "Análisis de canales"); "30m" u otro valor los reactiva.
+NETPULSE_SCAN_INTERVAL=$SCAN_VALUE
 ` + func() string {
 		wanLine := "# NETPULSE_WAN_TARGET=1.1.1.1    # solo si este equipo es el gateway"
 		if targets.WanTarget != "" {
@@ -287,6 +297,15 @@ selfheal_binary() {
 	[ -f "$ENV_FILE" ] || return 1
 	. "$ENV_FILE" 2>/dev/null
 	[ -n "${NETPULSE_SERVER:-}" ] && [ -n "${NETPULSE_TOKEN:-}" ] && [ -n "${NETPULSE_SLUG:-}" ] || return 1
+	case "${NETPULSE_SERVER%%:*}" in
+		https|HTTPS) ;;
+		*)
+			[ "${NETPULSE_ALLOW_INSECURE_COMMANDS:-}" = "1" ] || {
+				logger -t netpulse-agent "self-heal: HTTP sin NETPULSE_ALLOW_INSECURE_COMMANDS=1, binario no descargado"
+				return 1
+			}
+			;;
+	esac
 	case "$(uname -m)" in
 		aarch64|arm64) local ARCH=arm64 ;;
 		armv7l|armv7|armhf|arm) local ARCH=arm ;;
@@ -299,16 +318,32 @@ selfheal_binary() {
 			esac ;;
 		*) return 1 ;;
 	esac
-	local url tmp
+	local url tmp hdr digest sum
 	url="${NETPULSE_SERVER%/}/api/agents/${NETPULSE_SLUG}/binary?arch=${ARCH}"
 	logger -t netpulse-agent "self-heal: binario ausente, descargando de $NETPULSE_SERVER"
 	tmp=/tmp/netpulse-agent.$$
+	hdr=/tmp/netpulse-agent.hdr.$$
 	local ctls="" wtls=""
 	if [ -f /etc/netpulse-ca.pem ]; then ctls="--cacert /etc/netpulse-ca.pem"; wtls="--ca-certificate=/etc/netpulse-ca.pem"; fi
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL $ctls -m 120 -H "Authorization: Bearer $NETPULSE_TOKEN" -o "$tmp" "$url" || return 1
+		curl -fsSL $ctls -m 120 -D "$hdr" -H "Authorization: Bearer $NETPULSE_TOKEN" -o "$tmp" "$url" || { rm -f "$tmp" "$hdr"; return 1; }
 	else
-		wget -q $wtls -T 60 -O "$tmp" --header="Authorization: Bearer $NETPULSE_TOKEN" "$url" || return 1
+		wget -S $wtls -T 60 -O "$tmp" --header="Authorization: Bearer $NETPULSE_TOKEN" "$url" 2>"$hdr" || { rm -f "$tmp" "$hdr"; return 1; }
+	fi
+	digest=$(grep -i '^[[:space:]]*x-checksum-sha256:' "$hdr" 2>/dev/null | tail -n 1 | tr -d '\r' | awk '{print $2}')
+	rm -f "$hdr"
+	case "$digest" in
+		""|*[!0123456789abcdefABCDEF]*)
+			logger -t netpulse-agent "self-heal: sin X-Checksum-Sha256 válido, binario descartado"
+			rm -f "$tmp"
+			return 1 ;;
+	esac
+	[ "${#digest}" -eq 64 ] || { logger -t netpulse-agent "self-heal: digest con longitud inválida, binario descartado"; rm -f "$tmp"; return 1; }
+	sum=$(sha256sum "$tmp" 2>/dev/null | awk '{print $1}')
+	if [ -z "$sum" ] || [ "$(printf '%s' "$sum" | tr 'A-F' 'a-f')" != "$(printf '%s' "$digest" | tr 'A-F' 'a-f')" ]; then
+		logger -t netpulse-agent "self-heal: SHA-256 no coincide, binario descartado"
+		rm -f "$tmp"
+		return 1
 	fi
 	chmod 0755 "$tmp" && mv "$tmp" /usr/sbin/netpulse-agent || { rm -f "$tmp"; return 1; }
 	logger -t netpulse-agent "self-heal: binario restaurado"

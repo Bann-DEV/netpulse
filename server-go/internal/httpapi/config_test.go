@@ -106,11 +106,11 @@ func TestConfigRoutersCRUD(t *testing.T) {
 		t.Fatalf("type inválido: %d", res.StatusCode)
 	}
 
-	// #1481: asuswrt es un type válido (unidad agent-only sin SSH/procd).
+	// #1579: Asuswrt/Merlin se registra como external desde el pusher.
 	res = doReq(t, "POST", srv.URL+"/api/config/routers", cookie,
 		`{"name":"GT-BE98 Pro","host":"192.168.8.30","type":"asuswrt","agent_only":true}`)
-	if res.StatusCode != 201 {
-		t.Fatalf("type asuswrt: %d, want 201", res.StatusCode)
+	if res.StatusCode != 400 {
+		t.Fatalf("type asuswrt: %d, want 400", res.StatusCode)
 	}
 
 	// POST JSON inválido → 400 invalid_json
@@ -513,8 +513,11 @@ func TestConfigRoutersSNMP(t *testing.T) {
 	if router["snmp_enabled"] != true {
 		t.Fatalf("snmp_enabled tras alta: %v", router)
 	}
-	if router["snmp_community"] != "public" {
-		t.Fatalf("snmp_community tras alta: %v", router)
+	if _, ok := router["snmp_community"]; ok {
+		t.Fatalf("snmp_community no debe exponerse: %v", router)
+	}
+	if router["snmp_community_set"] != true {
+		t.Fatalf("snmp_community_set tras alta: %v", router)
 	}
 	if router["snmp_port"] != float64(161) {
 		t.Fatalf("snmp_port tras alta: %v", router)
@@ -530,8 +533,25 @@ func TestConfigRoutersSNMP(t *testing.T) {
 	if rt["snmp_enabled"] != false {
 		t.Fatalf("snmp_enabled tras PUT: %v", rt)
 	}
-	if rt["snmp_community"] != "secret" {
-		t.Fatalf("snmp_community tras PUT: %v", rt)
+	if _, ok := rt["snmp_community"]; ok {
+		t.Fatalf("snmp_community no debe exponerse tras PUT: %v", rt)
+	}
+	if rt["snmp_community_set"] != true {
+		t.Fatalf("snmp_community_set tras PUT: %v", rt)
+	}
+
+	res = doReq(t, "POST", srv.URL+"/api/config/routers", cookie,
+		`{"name":"sw3","host":"192.168.8.22","type":"managed-switch"}`)
+	if res.StatusCode != 201 {
+		t.Fatalf("POST router sin SNMP: %d", res.StatusCode)
+	}
+	body = readJSON(t, res)
+	router = body["router"].(map[string]any)
+	if _, ok := router["snmp_community"]; ok {
+		t.Fatalf("snmp_community no debe exponerse sin configurar: %v", router)
+	}
+	if router["snmp_community_set"] != false {
+		t.Fatalf("snmp_community_set sin configurar: %v", router)
 	}
 
 	res = doReq(t, "POST", srv.URL+"/api/config/routers", cookie,
@@ -541,44 +561,14 @@ func TestConfigRoutersSNMP(t *testing.T) {
 	}
 }
 
-func TestConfigRoutersRouterOS(t *testing.T) {
+func TestConfigRoutersRejectsRouterOS(t *testing.T) {
 	srv := makeTestServer(t)
 	_, cookie, _ := loginCookie(t, srv.URL, "admin", "test123456")
 
-	// POST RouterOS con credenciales
 	res := doReq(t, "POST", srv.URL+"/api/config/routers", cookie,
-		`{"name":"mikrotik","host":"192.168.8.1","type":"routeros","routeros_user":"admin","routeros_password":"secretpassword","routeros_insecure":true}`)
-	if res.StatusCode != 201 {
-		t.Fatalf("POST router: %d", res.StatusCode)
-	}
-	body := readJSON(t, res)
-	router := body["router"].(map[string]any)
-	if router["type"] != "routeros" {
-		t.Fatalf("type: %v", router["type"])
-	}
-	if router["routeros_user"] != "admin" {
-		t.Fatalf("routeros_user: %v", router["routeros_user"])
-	}
-	if router["routeros_insecure"] != true {
-		t.Fatalf("routeros_insecure: %v", router["routeros_insecure"])
-	}
-	if _, present := router["routeros_password"]; present {
-		t.Fatalf("routeros_password no debe devolverse en la API: %v", router)
-	}
-
-	// PUT actualiza usuario e insecure
-	res = doReq(t, "PUT", srv.URL+"/api/config/routers/mikrotik", cookie,
-		`{"host":"192.168.8.1","routeros_user":"netpulse","routeros_insecure":false}`)
-	if res.StatusCode != 200 {
-		t.Fatalf("PUT router: %d", res.StatusCode)
-	}
-	body = readJSON(t, res)
-	rt := body["router"].(map[string]any)
-	if rt["routeros_user"] != "netpulse" {
-		t.Fatalf("routeros_user tras PUT: %v", rt["routeros_user"])
-	}
-	if rt["routeros_insecure"] != false {
-		t.Fatalf("routeros_insecure tras PUT: %v", rt["routeros_insecure"])
+		`{"name":"mikrotik","host":"192.168.8.1","type":"routeros","routeros_user":"admin"}`)
+	if res.StatusCode != 400 {
+		t.Fatalf("POST routeros: %d, want 400", res.StatusCode)
 	}
 }
 
@@ -657,6 +647,43 @@ func TestProxmoxConfig(t *testing.T) {
 	}
 }
 
+func TestProxmoxTLSConfig(t *testing.T) {
+	srv := makeTestServer(t)
+	_, cookie, _ := loginCookie(t, srv.URL, "admin", "test123456")
+
+	res := doReq(t, "PUT", srv.URL+"/api/config/proxmox", cookie,
+		`{"id":"casa","name":"Casa","url":"https://192.168.1.100:8006","tokenId":"root@pam!netpulse","secret":"uuid-1234","caPem":"PEM-CA","fingerprintSha256":"AABB","insecure":true}`)
+	if res.StatusCode != 204 {
+		body := readJSON(t, res)
+		t.Fatalf("PUT proxmox tls: %d %v", res.StatusCode, body)
+	}
+
+	res = doReq(t, "GET", srv.URL+"/api/config/proxmox", cookie, "")
+	body := readJSON(t, res)
+	instances, _ := body["instances"].([]any)
+	if len(instances) != 1 {
+		t.Fatalf("instances: %v", instances)
+	}
+	inst, _ := instances[0].(map[string]any)
+	if inst["caPem"] != "PEM-CA" || inst["fingerprintSha256"] != "AABB" || inst["insecure"] != true {
+		t.Fatalf("GET proxmox tls: %v", inst)
+	}
+
+	res = doReq(t, "PUT", srv.URL+"/api/config/proxmox", cookie,
+		`{"id":"casa","caPem":"","fingerprintSha256":"","insecure":false}`)
+	if res.StatusCode != 204 {
+		body := readJSON(t, res)
+		t.Fatalf("PUT proxmox tls clear: %d %v", res.StatusCode, body)
+	}
+	res = doReq(t, "GET", srv.URL+"/api/config/proxmox", cookie, "")
+	body = readJSON(t, res)
+	instances, _ = body["instances"].([]any)
+	inst, _ = instances[0].(map[string]any)
+	if inst["caPem"] != "" || inst["fingerprintSha256"] != "" || inst["insecure"] != false {
+		t.Fatalf("GET proxmox tls clear: %v", inst)
+	}
+}
+
 // The Proxmox test endpoint: a failure is a result the form can show, not an
 // HTTP error, and it needs a session like the rest of the config API.
 func TestProxmoxTestEndpoint(t *testing.T) {
@@ -687,5 +714,55 @@ func TestProxmoxTestEndpoint(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode == http.StatusOK {
 		t.Fatalf("sin sesión devolvió %d", res.StatusCode)
+	}
+}
+
+func TestConfigRoutersHidesSNMPCommunity(t *testing.T) {
+	srv := makeTestServer(t)
+	_, adminCookie, _ := loginCookie(t, srv.URL, "admin", "test123456")
+
+	res := doReq(t, "POST", srv.URL+"/api/config/routers", adminCookie,
+		`{"name":"sw-secret","host":"192.168.8.30","type":"managed-switch","snmp_enabled":true,"snmp_community":"public"}`)
+	if res.StatusCode != 201 {
+		t.Fatalf("POST router: %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	viewerCookie := createUserAndLogin(t, srv.URL, adminCookie, "viewer-snmp", "test123456", "user")
+	readToken := mintToken(t, srv.URL, adminCookie, "read")
+
+	cases := []struct {
+		name string
+		res  *http.Response
+	}{
+		{"viewer", doReq(t, "GET", srv.URL+"/api/config/routers", viewerCookie, "")},
+		{"read token", tokenRequest(t, "GET", srv.URL, "/api/config/routers", readToken, "")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.res.Body.Close()
+			if tc.res.StatusCode != 200 {
+				t.Fatalf("GET config routers: %d", tc.res.StatusCode)
+			}
+			body := readJSON(t, tc.res)
+			routers, ok := body["routers"].([]any)
+			if !ok {
+				t.Fatalf("routers: %T", body["routers"])
+			}
+			for _, item := range routers {
+				rt, ok := item.(map[string]any)
+				if !ok || rt["id"] != "sw-secret" {
+					continue
+				}
+				if _, leaked := rt["snmp_community"]; leaked {
+					t.Fatal("snmp_community must not be exposed")
+				}
+				if rt["snmp_community_set"] != true {
+					t.Fatalf("snmp_community_set: %v", rt["snmp_community_set"])
+				}
+				return
+			}
+			t.Fatal("router sw-secret not found")
+		})
 	}
 }

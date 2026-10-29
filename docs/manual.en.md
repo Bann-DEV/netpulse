@@ -36,6 +36,10 @@ NetPulse is multi-user with password authentication. The installer prints an ini
 
 There is also a **demo mode** that opens without a password or backend: it shows a sample network with dozens of devices so you can explore the UI. In demo there is no real data and the write features are disabled.
 
+### Transport security
+
+When neither TLS nor on-box HTTPS is enabled, the server binds to `127.0.0.1` by default. A fresh installation therefore does not accept logins from the LAN. Set `NETPULSE_BIND=0.0.0.0` only when you deliberately want to expose it, and enable TLS (`NETPULSE_TLS_ENABLED=1`) for any remote access. With TLS or on-box HTTPS enabled the bind stays open unless `NETPULSE_BIND` says otherwise. An installation that already has its database keeps the listener open on every interface, so an upgrade does not cut access. The choice is stored in `data/.bind-mode`, so restarting a fresh installation does not open it to the LAN, and the installer writes `NETPULSE_BIND=127.0.0.1` in the new environment file.
+
 ---
 
 ## Overview
@@ -135,6 +139,19 @@ For routers the server cannot reach over SSH, use the **pairing token** (Setting
 1. In **Devices**, if there are outdated agents you will see a notice with the count.
 2. Click **Update agents** and confirm.
 3. Follow the progress panel: per agent you will see the status (waiting, downloading, installing, updated, or no response). An agent that does not respond within a few seconds requires manual reinstall.
+
+### Agent transport security
+
+Privileged agent commands (apply, upgrade, firmware upgrade and config backup) require the agent to reach the server over HTTPS. If the agent reports over plain HTTP, the server rejects the command with `insecure_agent_transport` and leaves it queued or pending instead of sending it in clear.
+
+The agent also refuses privileged SSE events when `NETPULSE_SERVER` is not HTTPS. During a migration to HTTPS, two environment variables open a temporary exception:
+
+- `NETPULSE_ALLOW_INSECURE_COMMANDS=1` on the agent.
+- `NETPULSE_ALLOW_INSECURE_AGENT_COMMANDS=1` on the server.
+
+Use them only while moving the fleet to HTTPS, then remove them. Binary upgrades always require the `X-Checksum-Sha256` header: both the agent upgrade and the self-heal discard the binary when the header is missing or the digest does not match.
+
+The init self-heal follows the same transport policy: it only downloads the binary when `NETPULSE_SERVER` is HTTPS or `NETPULSE_ALLOW_INSECURE_COMMANDS=1` is set. Without that valve, an HTTP agent missing its binary does not self-heal and logs the refusal. That is preferable to running a binary downloaded over an unauthenticated channel.
 
 ---
 
@@ -371,6 +388,8 @@ Per router, one card per WiFi radio with the **current channel**, the **recommen
 
 The plan is computed from each radio's **neighbor scans**. There is a key difference here: routers running the **NetGrip** panel (the gateway and the APs managed by its panel) **do not scan neighbors**; routers with the **NetPulse agent** do. That is why some routers show no recommendation.
 
+Since agent 3.0.25 the periodic scan is **off by default** (`NETPULSE_SCAN_INTERVAL=0` in `/etc/netpulse-agent.env`): `iw scan` takes the radio off-channel for 2-4s and some beacon-sensitive clients (ESP8266/ESP32 devices, Cast speakers) get disassociated in that window (see #1557). Neighbors refresh when you open this page if the data is older than 6 hours (one scan per physical radio, with a 5 minute gap between requests) and with the **Scan now** button. To go back to periodic scans, set `NETPULSE_SCAN_INTERVAL=30m` (or any interval) in `/etc/netpulse-agent.env` and restart the agent.
+
 ### How to read it
 
 - **Current channel** in large text, **recommended channel** highlighted when different.
@@ -538,8 +557,9 @@ This is the largest screen. Main sections:
 - **Topology overrides** and **Trusted devices** (admin only).
 - **Agent adoption**: pairing token and server fingerprint.
 - **AdGuard Home**: configuration of the read-only connection to the router's AdGuard panel.
+- **Proxmox VE**: read-only cluster inventory. Besides the URL and token, you can paste a CA certificate, pin a SHA-256 fingerprint or enable an explicit insecure mode for a trusted self-signed host.
 - **My profile**: name, language, password and sign out.
-- **API Tokens**: bearer tokens for integrations.
+- **API Tokens**: bearer tokens for integrations. A `read` token only allows `GET`, `HEAD` and `OPTIONS`, a `write` token can also mutate non-admin resources, and only an `admin` token reaches administration routes and the database download.
 - **About**: version, links, push/PWA, Telegram and system data.
 
 ### Design decisions
@@ -621,7 +641,7 @@ The temperature, signal and latency thresholds that define health and alerts are
 
 ### Procedure: enable it
 
-The usual way is the **MQTT card in Settings**: turn it on, enter host, port and credentials, test the connection and save; it applies live, without a restart. From the same card you can **propagate the configuration to the NetGrip routers** in the fleet, so you do not configure them one by one.
+The usual way is the **MQTT card in Settings**: turn it on, enter host, port and credentials, test the connection and save; it applies live, without a restart. From the same card you can **propagate the configuration to the NetGrip routers** in the fleet, so you do not configure them one by one. Propagation creates one plan per router and only **queues** it on its agent: the card marks it as awaiting confirmation and the real outcome (applied or failed) shows up in Orchestration when the agent reports it.
 
 The alternative is environment variables (or the UCI options `mqtt_*` with the on-box install):
 

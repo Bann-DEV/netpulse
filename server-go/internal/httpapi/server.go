@@ -57,7 +57,7 @@ import (
 // Version es la versión del backend (app.js:18). Es una var (no const) para
 // que goreleaser la inyecte con -X httpapi.Version={{.Version}} y el health
 // reporte la versión del tag; los builds locales caen al fallback.
-var Version = "2.47.0"
+var Version = "2.48.1"
 
 // Deps son las dependencias del servidor API (como createApp de app.js).
 type Deps struct {
@@ -152,6 +152,7 @@ type server struct {
 	hub     *sse.Hub
 	secret  string
 	agents  *adapters.AgentRegistry
+	pushMu  sync.Mutex
 	pool    SSHRunner
 	rearmer *rearmer.Rearmer
 	lastOv  func() *adapters.Overview
@@ -176,6 +177,12 @@ type server struct {
 	// Anti-martilleo de POST /api/refresh (global, min 5 s entre sondeos).
 	refreshMu   sync.Mutex
 	lastRefresh time.Time
+
+	// Anti-martilleo del scan bajo demanda del plan de canales (#1561): un
+	// scan por unidad cada planScanMinInterval. El scan saca la radio del
+	// canal, así que varias pestañas no pueden encadenarlos.
+	planScanMu   sync.Mutex
+	lastPlanScan map[string]time.Time
 
 	// Rate limit por IP de POST /api/ingest/agent (30/min, SPEC-AGENTE §1).
 	ingestLimit *ipRateLimit
@@ -408,24 +415,24 @@ func NewHandler(d Deps) http.Handler {
 	mux.Handle("DELETE /api/devices/{mac}/block", auth.RequireAdmin(http.HandlerFunc(s.handleDeviceBlockDelete)))
 	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
 	mux.HandleFunc("GET /api/alerts/config", s.handleAlertsConfigGet)
-	mux.HandleFunc("PUT /api/alerts/config", s.handleAlertsConfigPut)
-	mux.HandleFunc("POST /api/alerts/read", s.handleAlertsRead)
-	mux.HandleFunc("POST /api/alerts/read-all", s.handleAlertsReadAll)
-	mux.HandleFunc("POST /api/alerts/clear", s.handleAlertsClear)
-	mux.HandleFunc("POST /api/alerts/dismiss", s.handleAlertsDismiss)
-	mux.HandleFunc("POST /api/alerts/silence", s.handleAlertsSilence)
-	mux.HandleFunc("POST /api/alerts/unsilence", s.handleAlertsUnsilence)
+	mux.Handle("PUT /api/alerts/config", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsConfigPut)))
+	mux.Handle("POST /api/alerts/read", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsRead)))
+	mux.Handle("POST /api/alerts/read-all", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsReadAll)))
+	mux.Handle("POST /api/alerts/clear", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsClear)))
+	mux.Handle("POST /api/alerts/dismiss", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsDismiss)))
+	mux.Handle("POST /api/alerts/silence", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsSilence)))
+	mux.Handle("POST /api/alerts/unsilence", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsUnsilence)))
 	mux.HandleFunc("GET /api/alerts/silenced", s.handleAlertsSilenced)
-	mux.HandleFunc("POST /api/alerts/impostor-approve", s.handleAlertsImpostorApprove)
-	mux.HandleFunc("POST /api/alerts/impostor-revoke", s.handleAlertsImpostorRevoke)
+	mux.Handle("POST /api/alerts/impostor-approve", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsImpostorApprove)))
+	mux.Handle("POST /api/alerts/impostor-revoke", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsImpostorRevoke)))
 	mux.HandleFunc("GET /api/alerts/impostor-approved", s.handleAlertsImpostorApproved)
 	mux.HandleFunc("GET /api/alerts/impostor-rule", s.handleAlertsImpostorRuleGet)
-	mux.HandleFunc("POST /api/alerts/impostor-rule", s.handleAlertsImpostorRuleSet)
+	mux.Handle("POST /api/alerts/impostor-rule", auth.RequireAdmin(http.HandlerFunc(s.handleAlertsImpostorRuleSet)))
 	mux.HandleFunc("GET /api/alert-rules", s.handleAlertRulesList)
 	mux.HandleFunc("GET /api/alert-rules/{id}", s.handleAlertRulesGet)
-	mux.HandleFunc("POST /api/alert-rules", s.handleAlertRulesCreate)
-	mux.HandleFunc("PUT /api/alert-rules/{id}", s.handleAlertRulesUpdate)
-	mux.HandleFunc("DELETE /api/alert-rules/{id}", s.handleAlertRulesDelete)
+	mux.Handle("POST /api/alert-rules", auth.RequireAdmin(http.HandlerFunc(s.handleAlertRulesCreate)))
+	mux.Handle("PUT /api/alert-rules/{id}", auth.RequireAdmin(http.HandlerFunc(s.handleAlertRulesUpdate)))
+	mux.Handle("DELETE /api/alert-rules/{id}", auth.RequireAdmin(http.HandlerFunc(s.handleAlertRulesDelete)))
 	mux.HandleFunc("GET /api/baselines", s.handleBaselines)
 	mux.HandleFunc("GET /api/internet-health", s.handleInternetHealth)
 	mux.HandleFunc("GET /api/presence", s.handlePresenceStatus)
@@ -442,7 +449,7 @@ func NewHandler(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/topology", s.handleTopology)
 	s.registerWireGuardUrgentRoutes(mux)
 	mux.HandleFunc("GET /api/usteer", s.handleUsteer)
-	mux.HandleFunc("POST /api/usteer/{mac}/kick", s.handleUsteerKick)
+	mux.Handle("POST /api/usteer/{mac}/kick", auth.RequireAdmin(http.HandlerFunc(s.handleUsteerKick)))
 	s.registerReanchorRoutes(mux)
 	mux.HandleFunc("GET /api/dot11r", s.handleDot11r)
 	mux.HandleFunc("GET /api/survey", s.handleSurvey)
@@ -567,7 +574,7 @@ func NewHandler(d Deps) http.Handler {
 	s.registerOrchestrRoutes(mux, d.Orchestr)
 
 	// --- Ajustes MQTT (#838; solo admin) ---
-	s.registerMQTTRoutes(mux, d.MQTT)
+	s.registerMQTTRoutes(mux, d.MQTT, d.Orchestr)
 
 	// --- Ajustes globales en kv (issue #121: orchestration opt-in) ---
 	s.registerSettingsRoutes(mux)

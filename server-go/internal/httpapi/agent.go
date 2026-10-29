@@ -25,6 +25,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -259,7 +260,10 @@ func (s *server) handleIngestAgent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "demo": true})
 		return
 	}
-	s.agents.Ingest(&p)
+	if !s.acceptAgentPush(&p) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stale": true})
+		return
+	}
 	// FORK: which agents still report over plain HTTP (Settings > HTTPS).
 	s.noteAgentTransport(p.Router, auth.IsSecureRequest(r))
 	// Fase 18 (#452): persistir scans pasivos de vecinos si el payload trae
@@ -447,8 +451,7 @@ func (s *server) rotateTokenHot(slug, token string) string {
 			break
 		}
 	}
-	// #1481: asuswrt no tiene SSH para rotar el token en caliente.
-	if host == "" || !s.routerUpgradeable(slug) || s.routerTypeOf(slug) == "asuswrt" {
+	if host == "" || !s.routerUpgradeable(slug) {
 		return "no_router"
 	}
 	if _, err := s.pool.Run(host, reinstall.TokenPushScript(slug, token), 60*time.Second); err != nil {
@@ -518,8 +521,13 @@ func (s *server) agentInstallLine(r *http.Request, slug, token string) string {
 	} else if tr.ServerFP != "" {
 		fpArg = " --server-fp=" + tr.ServerFP
 	}
+	// #1577: descarga a fichero y ejecuta SOLO si curl terminó bien. Con
+	// `curl | sh` el código de salida de curl se perdía: una descarga
+	// truncada (proxy, corte de red) llegaba al shell como script
+	// incompleto y moría con un "Syntax error: Unterminated quoted string"
+	// en una línea sin relación con la causa.
 	return fmt.Sprintf(
-		"%scurl -fsSL https://raw.githubusercontent.com/gnacho/netpulse/main/install-agent.sh | sh -s -- --host=%s --server=%s --slug=%s --token=%s%s%s%s",
+		"%scurl -fsSL --retry 3 -o /tmp/netpulse-install-agent.sh https://raw.githubusercontent.com/gnacho/netpulse/main/install-agent.sh && sh /tmp/netpulse-install-agent.sh --host=%s --server=%s --slug=%s --token=%s%s%s%s",
 		caArg, host, server, slug, token, caFileArg, fpArg, sshKeyArg)
 }
 
@@ -577,10 +585,7 @@ type agentUpgradeInfo struct {
 // actualizable; los de type managed-switch/external NO (son scrapers que no
 // usan el agente nativo y no entienden el comando "upgrade").
 func agentUpgradeable(typ string) bool {
-	// #1481: asuswrt se actualiza con el comando "upgrade" del agente (baja el
-	// binario y se lo cambia él mismo, sin procd); el REINSTALL por SSH sigue
-	// prohibido (handleAgentReinstall lo excluye aparte).
-	return typ == "" || typ == "openwrt" || typ == "glinet" || typ == "asuswrt"
+	return typ == "" || typ == "openwrt" || typ == "glinet"
 }
 
 // routerTypeOf: tipo de la fila routers para el slug ("" si no existe).
@@ -890,15 +895,6 @@ func (s *server) handleAgentReinstall(w http.ResponseWriter, r *http.Request) {
 			"este dispositivo no usa el agente nativo OpenWrt (scraper); reinstálalo con su propio mecanismo")
 		return
 	}
-	// #1481: asuswrt no tiene SSH/procd para un reinstall por el servidor; el
-	// agente se actualiza con el comando "upgrade" (o copiando el binario a
-	// mano), no reinstalando.
-	if s.routerTypeOf(slug) == "asuswrt" {
-		writeError(w, http.StatusConflict, "no_reinstall_asuswrt",
-			"en Asuswrt el agente se actualiza con el botón Actualizar (o copiando el binario); el reinstall por SSH no aplica")
-		return
-	}
-
 	// #1204: el env del agente lleva la sonda de latencia ACTIVA (WAN en el
 	// gateway, ping al gateway en los APs): el server resuelve el rol desde
 	// la tabla routers.
@@ -1035,10 +1031,10 @@ func (s *server) handleAgentsReemit(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[netpulse] reemit: env re-emitido a %d/%d agentes", reemitted, len(out))
 	writeJSON(w, http.StatusOK, map[string]any{
-		"agents":  out,
+		"agents":    out,
 		"reemitted": reemitted,
-		"total":   len(out),
-		"message": fmt.Sprintf("env re-emitido a %d de %d agentes", reemitted, len(out)),
+		"total":     len(out),
+		"message":   fmt.Sprintf("env re-emitido a %d de %d agentes", reemitted, len(out)),
 	})
 }
 
@@ -1211,6 +1207,33 @@ func cmpSemver(a, b string) int { return vercmp.Cmp(a, b) }
 // Lo llama el propio NetGrip al arrancar: NetPulse lo necesita para delegarle
 // ops (p. ej. la propagación de MQTT) sin depender de que haya subido un
 // backup de configuración antes.
+func (s *server) acceptAgentPush(p *probe.Payload) bool {
+	s.pushMu.Lock()
+	defer s.pushMu.Unlock()
+
+	key := "agent.last_push_ts." + p.Router
+	var last int64
+	if s.db != nil {
+		var raw string
+		if err := s.db.QueryRow("SELECT value FROM kv WHERE key = ?", key).Scan(&raw); err == nil {
+			last, _ = strconv.ParseInt(raw, 10, 64)
+		}
+	}
+	if p.Ts <= last {
+		return false
+	}
+	s.agents.Ingest(p)
+	if s.db != nil {
+		if _, err := s.db.Exec(
+			`INSERT INTO kv (key, value) VALUES (?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+			key, strconv.FormatInt(p.Ts, 10)); err != nil {
+			log.Printf("[netpulse] no se pudo persistir el ultimo push de %s: %v", p.Router, err)
+		}
+	}
+	return true
+}
+
 func (s *server) handleAgentExecutorToken(w http.ResponseWriter, r *http.Request) {
 	slug := r.Header.Get("X-Router-ID")
 	token := bearerToken(r)
@@ -1221,8 +1244,12 @@ func (s *server) handleAgentExecutorToken(w http.ResponseWriter, r *http.Request
 	var body struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
-		writeError(w, http.StatusBadRequest, "invalid json")
+	if status := readJSONBody(w, r, &body); status != 0 {
+		writeBodyError(w, status, "invalid_json", "invalid json")
+		return
+	}
+	if len(body.Token) == 0 || len(body.Token) > 512 {
+		writeError(w, http.StatusBadRequest, "invalid_token", "token must be 1-512 bytes")
 		return
 	}
 	if _, err := s.db.Exec(

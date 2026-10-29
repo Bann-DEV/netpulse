@@ -5,6 +5,36 @@ Todos los cambios notables de NetPulse se documentan en este fichero.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
+## [Unreleased]
+
+## [2.48.1] - 2026-10-29
+
+### Fixed
+
+- **UI inaccesible desde la LAN tras actualizar a 2.48.0 (#1647)**: el listener HTTP pasaba a `127.0.0.1` en cualquier instalación sin TLS, así que la actualización cortaba el acceso desde otros equipos sin ningún aviso. Ahora el loopback queda reservado a instalaciones nuevas (todavía sin base de datos), las que ya tienen `netpulse.db` conservan todas las interfaces, la decisión se guarda en `data/.bind-mode` para que un reinicio no abra una instalación nueva, el `.env` nuevo escribe `NETPULSE_BIND=127.0.0.1`, el arranque registra la dirección real y avisa cuando es solo local, el instalador deja de anunciar una URL de LAN que no responde y `NETPULSE_BIND` sigue mandando.
+
+### Changed
+
+- **Dependencias actualizadas**: se actualizan las dependencias directas de la app y de los tres módulos Go, incluidas `mq`, `gosnmp`, `mcp-go`, `x/crypto`, `x/net`, `x/text` y `modernc.org/sqlite`. `govulncheck` no encuentra vulnerabilidades alcanzables y no hay cambios de comportamiento previstos.
+
+## [2.48.0] - 2026-10-28
+
+### Security
+
+- **Listener HTTP en loopback por defecto sin TLS (#1607, #1608)**: sin TLS ni HTTPS on-box el servidor escucha en `127.0.0.1`, de modo que una instalación nueva no acepta acceso desde la LAN. `NETPULSE_BIND=0.0.0.0` lo abre a propósito. Las instalaciones que ya existen mantienen el listener abierto (ver #1647).
+
+### Added
+
+- **Errores por puerto en el beacon (#1620, #1622)**: el switch envía los contadores de errores RX y TX de cada puerto (`ie`/`oe`, los mismos valores que `ifInErrors`/`ifOutErrors` de la IF-MIB) y el servidor los guarda en `port_series_raw`, de modo que la salud del puerto deja de calcularse con errores a cero. Los beacons antiguos siguen valiendo: los campos son opcionales y se leen como cero.
+
+### Changed
+
+- **Asuswrt/Merlin pasa a integración externa (#1579)**: el tipo nativo `asuswrt` se migra a `external` conservando el token, las sondas portables siguen compartidas y el nuevo `asuswrt-pusher` vive en `netpulse-integrations`. Desaparecen el alta como `asuswrt` y su actualización desde la UI. La instalación y actualización pasan a ser manuales, como en las demás integraciones externas.
+
+### Fixed
+
+- **Self-heal del agente sin binario por HTTP**: el init solo descarga el binario si el servidor es HTTPS o si `NETPULSE_ALLOW_INSECURE_COMMANDS=1` está activo. Antes aceptaba un checksum que viajaba por el mismo canal HTTP, así que un intermediario podía sustituir binario y digest. La guarda está en el init instalado, en el heredoc del instalador y en el init que genera la reinstalación.
+
 ## [2.47.0] - 2026-10-23
 
 ### Added
