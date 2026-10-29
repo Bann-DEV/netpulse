@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.49.2] - 2026-10-29
+
+### Added
+
+- Router integrations can now be edited in place. Changing the host, the username, the password or the interval rewrites the pusher environment and restarts it, so a wrong value no longer forces deleting and recreating the integration. The editor covers both the local and the SSH deployment modes and keeps the current password when the field is left empty.
+
 ## [2.49.1] - 2026-10-29
 
 ### Fixed
