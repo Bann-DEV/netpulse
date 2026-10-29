@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.5] - 2026-10-29
+
+### Fixed
+
+- **El historial del demo respeta los niveles de categoría (#1662)**: el primer arreglo filtraba la lista de entrada, pero el feed del demo añade por su cuenta un conjunto de eventos, así que las categorías en "Nada" seguían apareciendo. Ahora el filtro se aplica al feed ya construido: con señal y VPN en "Nada" el historial pasa de 18 a 13 eventos.
+
 ## [2.48.4] - 2026-10-29
 
 ### Fixed
