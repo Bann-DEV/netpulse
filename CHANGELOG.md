@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.6] - 2026-10-29
+
+### Fixed
+
+- **Los valores por defecto de las alertas coinciden en frontend y backend (#1672)**: el frontend declaraba `clients` en "Solo urgentes" mientras el backend usaba "Todo". Ese valor no era solo del demo: rellena las categorías que falten al leer o escribir `/api/alerts/config`, así que si la lectura fallaba el panel mostraba un nivel que el servidor no usaba, y guardar desde ahí persistía el valor equivocado. Ahora las dos copias son iguales y un test compara las seis categorías para que no vuelvan a separarse. Se elimina además `passesAlertConfig()`, que ya no usaba nadie desde el arreglo del nivel "Nada".
+
 ## [2.48.5] - 2026-10-29
 
 ### Fixed
