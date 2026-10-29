@@ -7,9 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.3] - 2026-10-29
+
 ### Fixed
 
 - **El nivel "Nada" de una categoría la oculta del historial y de la campana (#1659)**: antes el nivel solo decidía qué se notificaba, así que una categoría en "Nada" seguía guardando eventos, apareciendo en el historial y sumando en la campana. Ahora "Nada" no registra el evento, no lo persiste y oculta los ya guardados sin reiniciar, mientras "Solo urgentes" sigue registrando todo y avisando solo de lo urgente. El contador del servidor y el del frontend usan el mismo criterio.
+- **El demo respeta los niveles de categoría (#1662)**: la lista de alertas del demo se filtra con la configuración vigente, así que la campana y el historial dejan de contradecirse y cambiar un nivel en los ajustes del demo se ve al instante. Al volver a "Todo" la categoría reaparece con sus eventos.
 
 ## [2.48.2] - 2026-10-29
 
