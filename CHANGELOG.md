@@ -7,6 +7,12 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.4] - 2026-10-29
+
+### Fixed
+
+- **La tarjeta de alertas recientes respeta los niveles de categoría (#1662)**: el panel del inicio listaba los primeros eventos sin mirar la configuración, así que una categoría en "Nada" podía asomar ahí mientras el historial y la campana la ocultaban. Ahora las tres vistas comparten el mismo criterio.
+
 ## [2.48.3] - 2026-10-29
 
 ### Fixed
