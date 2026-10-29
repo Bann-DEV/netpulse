@@ -7,6 +7,17 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.48.2] - 2026-10-29
+
+### Added
+
+- **Tercera vía de sonda WiFi en nodos Asuswrt con dhd (#1529)**: cuando ni `iw` ni la tabla de estaciones devuelven clientes o bandas, el agente recurre al binario Broadcom `wl` para listar las estaciones asociadas con su banda y ancho de canal. Corre solo como último recurso, así que no añade coste en los routers que ya funcionan con las vías normales. El agente sube a 3.0.30.
+
+### Fixed
+
+- **Instalador del agente: comprobación previa del servidor y copia atómica del binario (#1654)**: antes de tocar el router, el instalador verifica desde el propio router que alcanza `api/health` del servidor y aborta con un mensaje claro cuando no lo alcanza, por ejemplo si el servidor tiene TLS activo y se pasó la URL en HTTP. La copia del binario va a un fichero temporal que después se renombra de forma atómica, con códigos de error propios en lugar de un `scp` directo al destino final, de modo que una copia cortada ya no deja un binario truncado.
+- **Interfaces fantasma Broadcom fuera del panel de puertos (#1542)**: los puertos internos de los nodos Asuswrt que se anuncian como `dormant` o `unknown` y nunca suben dejan de contarse, así que el panel y los totales reflejan solo puertos reales. Los puertos caídos de verdad se siguen mostrando.
+
 ## [2.48.1] - 2026-10-29
 
 ### Fixed
