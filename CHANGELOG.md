@@ -7,6 +7,13 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.49.0] - 2026-10-29
+
+### Added
+
+- Integrations section to add external router pushers (MikroTik RouterOS and Asuswrt) from the app: it resolves the latest published release of each vendor, verifies the SHA-256 before running anything, keeps the credentials in a 0600 env file, registers the router as external and starts, stops or updates the pusher.
+- Tests for the vendor manifest, release resolution, checksum verification, safe tar extraction, env escaping and the store.
+
 ## [2.48.6] - 2026-10-29
 
 ### Fixed
