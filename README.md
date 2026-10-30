@@ -69,8 +69,10 @@ arrange it and the layout stays yours.
 
 **Every device, classified.** Hostnames, IPs, type detection (hostname
 patterns + OUI), first seen, band and signal for Wi-Fi clients, and the router
-each one is attached to. Label devices, reserve IPs, and see when something
-new shows up.
+each one is attached to. A static host that nothing else names, typically a
+switch or a server that never takes a DHCP lease, still gets its name from a
+forward-confirmed reverse lookup, done in the background and only for private
+addresses. Label devices, reserve IPs, and see when something new shows up.
 
 <p align="center">
   <picture>
@@ -109,7 +111,7 @@ the platform:
 |---|---|---|
 | OpenWrt (incl. GL.iNet) | Native `netpulse-agent` package (`.ipk`/`.apk`) | procd, UCI config, `luci-app-netpulse`, in-app install and upgrade |
 | Asuswrt / Asuswrt-Merlin | External `asuswrt-pusher` in [netpulse-integrations](https://github.com/gnacho/netpulse-integrations/tree/main/asuswrt) | Static binary in `/jffs`, using `/proc`, `iw` and `lldpd`. Manual install and update |
-| RouterOS | Separate Go pusher in [netpulse-integrations](https://github.com/gnacho/netpulse-integrations) | System, ports, DHCP, ARP, FDB, temperature, firmware and WAN traffic |
+| RouterOS | Separate Go pusher in [netpulse-integrations](https://github.com/gnacho/netpulse-integrations) | System, ports, DHCP, ARP, FDB, temperature, firmware and WAN traffic. The app can deploy it for you from the Integrations section |
 | External router families | Separate Go pusher in [netpulse-integrations](https://github.com/gnacho/netpulse-integrations) | See the [external integrations guide](docs/external-integrations.md) |
 | Managed switches | SNMP | Port states, speeds and LLDP-MIB neighbours |
 
