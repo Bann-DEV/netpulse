@@ -7,6 +7,18 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.49.4] - 2026-10-30
+
+### Added
+
+- The client view can pin its filter set as the default. The pin in the filter bar stores the current fleet, band, type, status, weak signal, minimum signal and AdGuard filters in the browser of that device, and they are restored every time the view is opened. Free text search stays out on purpose because it arrives from deep links.
+- `CONTRIBUTING.md` requires a recap of every open issue and pull request before cutting a release, saying what ships and what waits.
+
+### Fixed
+
+- Clearing the client filters now also resets the weak signal and minimum signal controls, which were previously left behind.
+- The manual describes every control of the client filter bar, including the weak signal, minimum signal and AdGuard filters, and documents the pinned filters.
+
 ## [2.49.3] - 2026-10-30
 
 ### Added
