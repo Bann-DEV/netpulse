@@ -25,7 +25,8 @@
     "channelPlan": "信道",
     "firmwareUpgrades": "固件升级",
     "help": "帮助",
-    "rack": "机架"
+    "rack": "机架",
+    "integrations": "集成"
   },
   "common": {
     "ago": {
@@ -1457,13 +1458,11 @@
       "openWrtBadge": "OpenWrt",
       "consolePolling": "控制台轮询",
       "consolePollingHint": "服务器登录交换机 Web UI 读取固件、运行时长和 MAC。固件控制台只允许单个会话：每次轮询都会踢掉已登录的人。若它把你踢出请禁用（用信标 v1.3+ 数据反正通过 UDP 到达）。",
-      "routerosUser": "RouterOS 用户",
-      "routerosPassword": "RouterOS 密码",
-      "routerosPasswordPlaceholder": "留空以保留当前值",
-      "routerosInsecure": "接受自签名 TLS 证书",
       "disabled": "已暂停",
       "disabledHint": "不轮询、不告警；历史保留。“已暂停”徽标在设备组中标记它，并使其从下拉中消失。",
-      "disabledBadge": "已暂停"
+      "disabledBadge": "已暂停",
+      "snmpCommunityConfigured": "已配置。留空则保留当前值。",
+      "snmpCommunityClear": "移除 community"
     },
     "overrides": {
       "title": "拓扑——手动标记",
@@ -1557,7 +1556,8 @@
       "pwSubmitting": "正在修改…",
       "pwChanged": "密码已更新",
       "pwError": "无法修改密码",
-      "editName": "编辑名称"
+      "editName": "编辑名称",
+      "logoutError": "无法退出登录。你的会话仍然有效。"
     },
     "users": {
       "title": "用户",
@@ -1698,7 +1698,13 @@
       "detectFound": "在 {{host}} 检测到 Proxmox 服务器——请填写令牌并保存",
       "detectFoundMany": "检测到 Proxmox 服务器：{{hosts}}——已预填第一个",
       "detectNotFound": "在设备组网络中未发现 Proxmox 服务器",
-      "hintShort": "只读 API：令牌需要 Sys.Audit 和 VM.Audit 权限。创建步骤见帮助页。"
+      "hintShort": "只读 API：令牌需要 Sys.Audit 和 VM.Audit 权限。创建步骤见帮助页。",
+      "caPem": "CA 证书（PEM）",
+      "caPemPlaceholder": "-----BEGIN CERTIFICATE-----",
+      "fingerprint": "SHA-256 指纹",
+      "fingerprintPlaceholder": "AA:BB:CC:...",
+      "insecure": "跳过 TLS 验证（不安全）",
+      "insecureHint": "仅在可信的自签名 Proxmox 上使用。配置 CA 或指纹更安全。"
     },
     "sections": {
       "personalization": "配置",
@@ -1775,7 +1781,9 @@
       "propagate": "传播到 NetGrip",
       "propagateEmpty": "设备组中没有可传播到的 NetGrip 路由器。",
       "running": "正在发布",
-      "notRunning": "已停止"
+      "notRunning": "已停止",
+      "propagatePending": "已发送，等待确认",
+      "propagateHint": "“已发送”并不代表已生效：要等 agent 回报结果，这个计划才会结束。实际状态请在编排页查看。"
     },
     "alertsLang": {
       "title": "通知语言",
@@ -2827,5 +2835,96 @@
     "betaText": "此视图仍在积极开发中，尚不完全可靠。请勿在生产环境中使用；欢迎反馈。",
     "disabledTitle": "机柜视图已禁用",
     "disabledText": "这是一个可选视图。请在 设置 → 服务 → 机柜视图 中启用它。"
+  },
+  "integrations": {
+    "title": "集成",
+    "subtitle": "外部路由器 pusher",
+    "listTitle": "已配置的集成",
+    "loading": "正在加载集成…",
+    "emptyTitle": "暂无集成",
+    "emptyDesc": "为 NetPulse 无法直接访问的路由器添加外部 pusher。",
+    "fresh": "数据新鲜",
+    "never": "从未",
+    "states": {
+      "running": "运行中",
+      "stopped": "已停止",
+      "error": "错误",
+      "installing": "安装中"
+    },
+    "ago": {
+      "s": "{{count}} 秒前",
+      "min": "{{count}} 分钟前",
+      "h": "{{count}} 小时前",
+      "d_one": "{{count}} 天前",
+      "d_other": "{{count}} 天前"
+    },
+    "actions": {
+      "start": "启动",
+      "stop": "停止",
+      "update": "更新",
+      "check": "检查",
+      "delete": "删除",
+      "edit": "编辑"
+    },
+    "confirm": {
+      "confirmDeleteTitle": "删除集成？",
+      "confirmDeleteDesc": "移除 {{slug}} 集成？如果它的 pusher 正在运行，会一并停止。"
+    },
+    "form": {
+      "add": "添加集成",
+      "selectVendor": "选择厂商",
+      "fieldSlug": "Slug",
+      "fieldSlugHint": "根据主机地址自动生成建议值",
+      "fieldSlugInvalid": "只能使用小写字母、数字和短横线",
+      "fieldVendor": "厂商",
+      "fieldHost": "主机",
+      "fieldHostPlaceholder": "192.168.1.1",
+      "fieldUsername": "用户名",
+      "fieldPassword": "密码",
+      "fieldInterval": "间隔（秒）",
+      "fieldIntervalInvalid": "间隔必须在 10 到 86400 秒之间",
+      "fieldArch": "架构",
+      "modeLocalHint": "这个 pusher 运行在 NetPulse 主机上。",
+      "modeSshHint": "SSH 模式下，pusher 会被安装到路由器内部。",
+      "submit": "创建",
+      "creating": "正在创建…"
+    },
+    "token": {
+      "tokenTitle": "集成已创建",
+      "tokenDesc": "请立即复制令牌。它只显示这一次，之后不会再出现。",
+      "copyToken": "复制令牌",
+      "copied": "已复制",
+      "copyHint": "请把令牌保存到安全的地方。"
+    },
+    "meta": {
+      "version": "版本",
+      "interval": "间隔",
+      "lastPush": "最近上报"
+    },
+    "errors": {
+      "invalid_slug": "Slug 无效。",
+      "invalid_vendor": "未知的厂商。",
+      "invalid_input": "输入无效。",
+      "invalid_interval": "间隔无效。",
+      "invalid_arch": "不支持的架构。",
+      "already_exists": "已存在使用这个 slug 的集成。",
+      "release_fetch_failed": "无法获取 release。",
+      "download_failed": "下载失败。",
+      "start_failed": "无法启动 pusher。",
+      "ssh_failed": "SSH 连接失败。",
+      "ssh_unavailable": "这个厂商不支持 SSH。",
+      "router_error": "路由器返回了错误。",
+      "not_found": "未找到该集成。",
+      "db_error": "数据库错误。",
+      "generic": "出了点问题。"
+    },
+    "edit": {
+      "title": "编辑集成",
+      "fieldPassword": "密码",
+      "fieldPasswordKeep": "留空则保留当前密码",
+      "save": "保存并重启",
+      "saving": "正在保存",
+      "restartHint": "保存会重写 pusher 的运行环境并重启它，因此新值立即生效。"
+    }
   }
 }
