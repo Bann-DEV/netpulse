@@ -7,6 +7,16 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.50.0] - 2026-10-30
+
+### Added
+
+- Devices that nothing else named, typically servers, switches and access points with a static address that never takes a lease, now fall back to the forward-confirmed PTR record of their address. Lookups run in the background with a cache, only private, CGNAT and link-local addresses are queried, and `NETPULSE_RDNS=0` turns it off. The device type is guessed again from the new name, and a host named this way is no longer counted as an unknown device.
+
+### Fixed
+
+- The fleet root port is resolved from the elected parent's MAC, falling back to the gateway MAC, so the topology guard no longer degenerates into "the deepest candidate wins" when the gateway MAC never shows up in a downstream switch FDB.
+
 ## [2.49.2] - 2026-10-29
 
 ### Added
