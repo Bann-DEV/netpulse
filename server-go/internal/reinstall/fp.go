@@ -31,6 +31,7 @@ const (
 type fpEntry struct {
 	fp     string
 	err    bool
+	reason error // causa del fallo de dial; solo va con err=true
 	filled time.Time
 }
 
@@ -44,11 +45,23 @@ var (
 // del leaf cert servido en serverURL. Solo para URLs https; para http o si
 // el handshake falla devuelve "" (el script se genera entonces sin FP, el
 // comportamiento previo a #851). Con cache por URL: positivo 24 h, negativo
-// 1 min. Nunca propaga error: el FP es mejora, no requisito del reinstall.
+// 1 min. Nunca propaga error: para el reinstall el FP es mejora, no requisito
+// (quien necesite la causa usa ServerFPWithError).
 func ServerFP(serverURL string) string {
+	fp, _ := ServerFPWithError(serverURL)
+	return fp
+}
+
+// ServerFPWithError es ServerFP devolviendo también la causa del fallo de
+// handshake. El reinstall no la necesita (el pin es mejora, no requisito, y un
+// "" simplemente genera el script sin FP), pero quien SÍ la necesita es el alta
+// de un pusher externo sobre https: ahí un "" silencioso se convierte en un
+// 201 seguido de un proceso que se niega a arrancar. Para URLs http, o
+// malformadas, devuelve ("", nil): no hay pin que derivar, pero tampoco error.
+func ServerFPWithError(serverURL string) (string, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
-		return ""
+		return "", nil
 	}
 	cacheKey := u.Host
 
@@ -59,9 +72,9 @@ func ServerFP(serverURL string) string {
 			ttl = fpNegativeTTL
 		}
 		if fpNow().Sub(e.filled) < ttl {
-			fp := e.fp
+			fp, reason := e.fp, e.reason
 			fpMu.Unlock()
-			return fp
+			return fp, reason
 		}
 	}
 	fpMu.Unlock()
@@ -69,9 +82,9 @@ func ServerFP(serverURL string) string {
 	fp, dialErr := dialFP(u.Host)
 
 	fpMu.Lock()
-	fpCache[cacheKey] = fpEntry{fp: fp, err: dialErr != nil, filled: fpNow()}
+	fpCache[cacheKey] = fpEntry{fp: fp, err: dialErr != nil, reason: dialErr, filled: fpNow()}
 	fpMu.Unlock()
-	return fp
+	return fp, dialErr
 }
 
 // dialFP hace el TLS dial y calcula el pin. Separada de ServerFP para poder
