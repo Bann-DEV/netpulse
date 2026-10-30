@@ -194,6 +194,16 @@ func (s *server) handleIntegrationsCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// El env que se va a escribir tiene que poder arrancar: con la URL en https
+	// el pin dejó de ser opcional (#13 en netpulse-integrations), y derivarlo
+	// exige que este server alcance su propia URL pública. Mejor un 502 aquí,
+	// sin tocar nada, que un alta que muere al segundo siguiente.
+	serverURL := s.agentBaseURL(r)
+	if err := requirePusherPin(serverURL); err != nil {
+		writeError(w, http.StatusBadGateway, "fingerprint_unreachable", err.Error())
+		return
+	}
+
 	// Resolver y descargar el último release verificado. En modo local se
 	// extrae el binario aquí (corre en este host); en modo ssh solo se
 	// verifica: el router descarga el asset él mismo.
@@ -260,7 +270,6 @@ func (s *server) handleIntegrationsCreate(w http.ResponseWriter, r *http.Request
 		_ = store.Delete(body.Slug)
 	}
 
-	serverURL := s.agentBaseURL(r)
 	token, err := s.rotateAgentTokenAtomic(body.Slug, func(tok string) error {
 		env := s.pusherEnv(vendor, row, body.Password, serverURL, tok)
 		if vendor.Mode == "local" {
@@ -303,7 +312,7 @@ func (s *server) pusherEnv(v rintegration.Vendor, row rintegration.Row, password
 	if v.Mode == "ssh" {
 		host = "127.0.0.1"
 	}
-	return map[string]string{
+	env := map[string]string{
 		prefix + "HOST":     host,
 		prefix + "USER":     row.Username,
 		prefix + "PASS":     password,
@@ -313,6 +322,10 @@ func (s *server) pusherEnv(v rintegration.Vendor, row rintegration.Row, password
 		"NETPULSE_SLUG":     row.Slug,
 		"NETPULSE_INTERVAL": strconv.Itoa(row.IntervalS) + "s",
 	}
+	for k, v := range pusherPinEnv(serverURL) {
+		env[k] = v
+	}
+	return env
 }
 
 func (s *server) runSSHInstall(v rintegration.Vendor, row rintegration.Row, env map[string]string, assetURL, sha256 string) error {
