@@ -374,6 +374,51 @@ func TestFleetFdbEvidence(t *testing.T) {
 	}
 }
 
+// Cadena gw -> core -> mid -> edge con el NAS colgado de core. La MAC bridge
+// del gateway NO aparece en ningún FDB downstream (gateway con bond/macvlan:
+// la MAC del cable no es la que el bridge detectado reporta), así que el root
+// port de #1373 queda vacío y sin otra fuente la relajación por profundidad
+// cuelga el NAS de edge: edge lo aprende EN su propio uplink (tránsito plano
+// hacia core), no aguas abajo. El root derivado de la MAC del padre electo sí
+// lo detecta y descarta el candidato.
+func TestFleetFdbEvidenceGatewayMacInvisibleRootByParent(t *testing.T) {
+	const (
+		macGW   = "AA:BB:CC:00:00:01"
+		macCore = "AA:BB:CC:00:00:02"
+		macMid  = "AA:BB:CC:00:00:03"
+		macEdge = "AA:BB:CC:00:00:04"
+		macNAS  = "AA:BB:CC:00:00:05"
+	)
+	polled := map[string]*routerPolled{
+		"gw": {brMac: macGW, fdb: map[string]string{
+			macCore: "lan1", macMid: "lan1", macEdge: "lan1", macNAS: "lan1",
+		}},
+		"core": {brMac: macCore, fdb: map[string]string{
+			macMid: "xg2", macEdge: "xg2", macNAS: "xg4", // sin macGW: invisible
+		}},
+		"mid": {brMac: macMid, fdb: map[string]string{
+			macCore: "sfp1", macEdge: "sfp2", macNAS: "sfp1", // NAS por su uplink
+		}},
+		"edge": {brMac: macEdge, fdb: map[string]string{
+			// Su uplink Te7 ve TODO el núcleo (tránsito plano), incluido el
+			// propio core: eso es lo que hace derivable el root.
+			macCore: "Te7", macMid: "Te7", macNAS: "Te7",
+		}},
+		"nas": {brMac: macNAS, fdb: map[string]string{macCore: "wan"}},
+	}
+	ev := fleetFdbEvidence(polled, "gw", nil, nil)
+	if got := ev["mid"]; got.parent != "core" || got.port != "xg2" || got.childPort != "sfp1" {
+		t.Fatalf("mid: %+v, want core/xg2 con childPort sfp1", got)
+	}
+	if got := ev["edge"]; got.parent != "mid" || got.port != "sfp2" || got.childPort != "Te7" {
+		t.Fatalf("edge: %+v, want mid/sfp2 con childPort Te7", got)
+	}
+	got := ev["nas"]
+	if got.parent != "core" || got.port != "xg4" {
+		t.Fatalf("nas: %+v, want core/xg4 (edge lo aprende en su propio root port Te7)", got)
+	}
+}
+
 // #1186: el caso real del switch gestionado: el switch aprende la MAC del gw
 // (su uplink, puerto 7) y la de los routers colgados de él; el router aprende
 // la MAC del switch. El padre del router es el switch (NO el gateway, que es
