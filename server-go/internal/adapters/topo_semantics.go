@@ -118,6 +118,32 @@ func fleetFdbEvidence(polled map[string]*routerPolled, gatewayID string, registe
 		}
 	}
 	parent := map[string]topoParent{}
+	// rootPortOf: el puerto de sid que mira al núcleo. #1373 lo derivaba solo
+	// de la MAC bridge del gateway, y eso falla en flotas donde el gateway no
+	// presenta esa MAC en el cable (bond/macvlan/NIC con MAC distinta al bridge
+	// detectado): el FDB del switch nunca contiene esa MAC, el root queda vacío
+	// y la relajación por profundidad vuelve a cuelga un switch de lo que
+	// aprende EN su propio uplink (tránsito plano). La MAC del padre electo es
+	// la misma evidencia y SIEMPRE está disponible —sid aprende a su padre por
+	// ese puerto—, así que manda; la del gateway queda de fallback hasta que
+	// sid tiene padre, y después como segunda fuente.
+	rootPortOf := func(sid string) string {
+		lm := learned[sid]
+		if len(lm) == 0 {
+			return ""
+		}
+		if p, ok := parent[sid]; ok {
+			if m := idToMac[p.parent]; m != "" {
+				if port := lm[m]; port != "" {
+					return port
+				}
+			}
+		}
+		if gwMac := idToMac[gatewayID]; gwMac != "" {
+			return lm[gwMac]
+		}
+		return ""
+	}
 	isDescendant := func(rid, c string) bool {
 		cur := c
 		for i := 0; i <= len(ids); i++ {
@@ -134,6 +160,25 @@ func fleetFdbEvidence(polled map[string]*routerPolled, gatewayID string, registe
 	}
 	for iter := 0; iter <= len(ids); iter++ {
 		changed := false
+		// Revocación: el root de un candidato puede volverse conocido después
+		// de que ganó (su propio padre se elige en una pasada posterior). Sin
+		// esto el error queda clavado porque la reelección solo acepta algo
+		// MÁS profundo, y el padre falso ya dejó al hijo en la mayor
+		// profundidad del árbol.
+		for _, rid := range ids {
+			if rid == gatewayID {
+				continue
+			}
+			p, ok := parent[rid]
+			if !ok {
+				continue
+			}
+			if cRoot := rootPortOf(p.parent); cRoot != "" && cRoot == p.port {
+				delete(parent, rid)
+				depth[rid] = 0
+				changed = true
+			}
+		}
 		for _, rid := range ids {
 			if rid == gatewayID {
 				continue
@@ -155,11 +200,7 @@ func fleetFdbEvidence(polled map[string]*routerPolled, gatewayID string, registe
 				// la relajación por profundidad cuelga un switch gestionado de
 				// sus propios APs (p. ej. switch16 <- rt4 cuando la física es
 				// switch16 -> gateway por lan7).
-				cRoot := ""
-				if gwMac := idToMac[gatewayID]; gwMac != "" {
-					cRoot = learned[c.parent][gwMac]
-				}
-				if cRoot != "" && c.port == cRoot {
+				if cRoot := rootPortOf(c.parent); cRoot != "" && c.port == cRoot {
 					continue
 				}
 				if isDescendant(rid, c.parent) {
