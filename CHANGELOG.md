@@ -7,13 +7,25 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 
 ## [Unreleased]
 
+## [2.50.0] - 2026-10-31
+
 ### Added
+
+- UniFi controller vendor (#1695): a read-only `unifi-pusher` for self-hosted UniFi Network controllers, both UniFi OS consoles (UDM, UDM Pro, UNVR and similar) and classic standalone ones; ui.com cloud accounts are not supported, the pusher only speaks to a controller reachable on the LAN. One site per integration: gateways, switches and access points with their ports and uplinks (the topology hangs together without LLDP), wired and wireless clients with band and signal, MAC-to-IP mapping, and gateway uptime and identity. Surfaces with no verified read-only match (DHCP leases, per-interface counters, VLANs, roaming, CPU, temperature) are not emitted. It deploys from the Integrations section like RouterOS, on the host that runs the server.
+
+- The Integrations vendor catalog ships as a manifest (#1706): `vendors_seed.json` names each vendor with its release tag prefix, binary and architectures, so adding a vendor or an architecture is a manifest entry instead of a compiled table in the core.
 
 - Integrations in ssh mode accept password authentication (#1708): when the optional companion file `<data-dir>/integrations/<slug>.sshpass` (0600, same discipline as the environment file) exists, the server signs in to the router with the integration username and password; without it the server key stays the default and preferred path. The create and edit forms reuse the same password field for it (empty on edit keeps the current one), the password never reaches the database or any API response, deleting the integration removes the file, and an authentication rejection reports its own `ssh_auth_failed` code instead of the generic `ssh_failed`. Stock Asuswrt (dropbear with password auth only) now works with no manual key setup.
 
-### Fixed
+- Inactive agents in the fleet table now offer Rearm, Reinstall and the copyable install command next to Remove, so a rejected token (HTTP 401 after a reboot or a server move) can be fixed without removing the agent or losing its history. NetGrip rows offer Rearm only and external pushers keep Remove only.
+- The card and the detail of a unit pushed by an integration (RouterOS and other vendors) show why it is offline: authentication rejected, missing API endpoint (old firmware, REST needs RouterOS 7+), connection refused or pusher stopped, with the raw pusher error on the tooltip.
+- The on-box server init script now refuses to start when its data dir is not a real mount (default overlay paths excluded), so an unmounted USB stick can no longer leave a fresh SQLite database on flash. It also moves to `START=99` to let USB mounts settle first.
 
-- `NETPULSE_DB_ROLLBACK_JOURNAL=1` restores the previous on-box SQLite journal engine (DELETE + synchronous FULL) after the #1700 default change; `NETPULSE_DB_TEMP_STORE` (`memory` | `file` | `default`) controls where SQLite aggregation spills go, and is also settable on-box via the new `db_rollback_journal` / `db_temp_store` UCI options.
+- The agents table marks a rejected-token agent with its own badge the moment the pusher authenticates with a stale token (a reboot or a server move does it), and the badge clears itself on the first valid push. The Integrations rows carry the same offline classification as the unit detail, so a dead integration explains itself in place (#1719).
+
+### Changed
+
+- The manual documents the agent recovery flow (Rearm restarts the agent service, Reinstall rotates a rejected token) and the agent tooltips and banners point to the agents section on Devices, which hosts the reinstall action, instead of the router detail page.
 
 ### Fixed
 
@@ -21,17 +33,13 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 - Heavy write volume on-box (#1700): the on-box server now runs SQLite in WAL mode with `synchronous=NORMAL` and `temp_store=MEMORY`, the same engine as every other deployment. The previous on-box choice (rollback journal DELETE + synchronous FULL, Fase 9 R6) rewrote pages and journal on every transaction and tripled the measured write volume (45 GB/day on a USB stick with a 107 MB database, versus 13.7 GB/day in WAL with the same fleet). WAL with `synchronous=NORMAL` cannot corrupt on a power cut; only the commits not yet synced are rolled back. The hourly checkpoint and nightly jobs now run for on-box installs too, so the `-wal` file stays bounded.
 - SQLite aggregation spills (the `etilqs_*` temp files) no longer hit disk by default. The report measured two ~3.16 MB temp files per 60 s window, about 9.1 GB/day and two thirds of the server's process writes with a ~100 MB database; with `temp_store=MEMORY` the same aggregation happens in RAM (a few MB per query).
 
-### Added
+- Asuswrt over SSH installs the Merlin way (#1705): binary and environment under `/jffs/netpulse`, a small pidfile control script for start, stop and status, and the boot hook as a managed block inside `/jffs/scripts/services-start` (removed cleanly on uninstall) instead of a procd service, which Asuswrt does not have. Nothing is written outside `/jffs` except the hook line.
 
-- Inactive agents in the fleet table now offer Rearm, Reinstall and the copyable install command next to Remove, so a rejected token (HTTP 401 after a reboot or a server move) can be fixed without removing the agent or losing its history. NetGrip rows offer Rearm only and external pushers keep Remove only.
-- The card and the detail of a unit pushed by an integration (RouterOS and other vendors) show why it is offline: authentication rejected, missing API endpoint (old firmware, REST needs RouterOS 7+), connection refused or pusher stopped, with the raw pusher error on the tooltip.
-- The on-box server init script now refuses to start when its data dir is not a real mount (default overlay paths excluded), so an unmounted USB stick can no longer leave a fresh SQLite database on flash. It also moves to `START=99` to let USB mounts settle first.
+- Enabled local integrations resume on boot (#1704): after a server restart every enabled pusher starts again, and rows left stale by a crash or a kill reconcile to what is actually running.
 
-### Changed
+- Pre-pin pusher environments heal on update and edit (#1699): an integration created before the SPKI pin change gets its environment rewritten by the next update or edit instead of staying pinned-less until it is deleted and recreated.
 
-- The manual documents the agent recovery flow (Rearm restarts the agent service, Reinstall rotates a rejected token) and the agent tooltips and banners point to the agents section on Devices, which hosts the reinstall action, instead of the router detail page.
-
-### Fixed
+- Pusher environments ship the server SPKI pin (#1685): external pushers verify the server TLS certificate against the pinned public key, the same trust model as the native agent.
 
 - The greeting line on the Overview ("N important alerts") now counts the same alerts as the bell and the Alerts page (unread, level-filtered), instead of the health score breakdown. A health penalty without a visible alert, such as a down VPN peer with the vpn category set to "Nada", used to leave a phantom counter that could not be cleared from anywhere (#1707).
 - OpenWrt 21.02 on-box package (GL.iNet GL-MT6000 report): the `.ipk` now installs `/etc/init.d/netpulse`, the agent init and the uci-defaults scripts as executable (`0755`), and the packaging scripts verify the modes inside the built `.ipk`.
@@ -41,6 +49,14 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 - The default on-box port is now 3100 instead of 3000, which collides with the AdGuard Home UI shipped by GL.iNet firmware. Existing installs keep their configured port.
 - The initial bootstrap password is removed from UCI after a password change, so the generated plaintext no longer stays in `/etc/config/netpulse` forever.
 - README: `DEMO_MODE=1` requires `AUTH_PASS` even in demo mode, and the settings section holding the SSH public key is called Fleet (formerly documented as Network).
+
+- `NETPULSE_DB_ROLLBACK_JOURNAL=1` restores the previous on-box SQLite journal engine (DELETE + synchronous FULL) after the #1700 default change; `NETPULSE_DB_TEMP_STORE` (`memory` | `file` | `default`) controls where SQLite aggregation spills go, and is also settable on-box via the new `db_rollback_journal` / `db_temp_store` UCI options.
+
+### Security
+
+- Dependencies: `minimatch` forced to 11.0.3 through overrides (#1721, Dependabot alert 37). The globparts amplification advisory has no 10.x patch and the package only reaches the build through the lint toolchain, so the override is the only path.
+
+- Dependencies: pick up the gonzalop/mq audit fixes (#1693).
 
 ## [2.49.4] - 2026-10-30
 
