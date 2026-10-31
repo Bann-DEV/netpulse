@@ -19,6 +19,7 @@ y este proyecto se adhiere a [Versionado Semántico](https://semver.org/lang/es/
 ### Added
 
 - Inactive agents in the fleet table now offer Rearm, Reinstall and the copyable install command next to Remove, so a rejected token (HTTP 401 after a reboot or a server move) can be fixed without removing the agent or losing its history. NetGrip rows offer Rearm only and external pushers keep Remove only.
+- The card and the detail of a unit pushed by an integration (RouterOS and other vendors) show why it is offline: authentication rejected, missing API endpoint (old firmware, REST needs RouterOS 7+), connection refused or pusher stopped, with the raw pusher error on the tooltip.
 - The on-box server init script now refuses to start when its data dir is not a real mount (default overlay paths excluded), so an unmounted USB stick can no longer leave a fresh SQLite database on flash. It also moves to `START=99` to let USB mounts settle first.
 
 ### Changed
