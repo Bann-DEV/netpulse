@@ -462,7 +462,8 @@
       "roaming": "漫游（24 小时）",
       "roamingHealthy": "未切换 AP",
       "showUnprotected": "仅显示未受保护客户端",
-      "unprotectedPill": "未受 AdGuard 保护"
+      "unprotectedPill": "未受 AdGuard 保护",
+      "roamingNoSource": "无 wireless 数据"
     },
     "summary": "已知 {{total}} · 当前在线 {{online}}",
     "viewRouter": "查看路由器 {{name}}",
@@ -2200,7 +2201,14 @@
       "noScans": "该路由器不上报信道扫描。NetGrip 路由器不做扫描；请使用运行 NetPulse agent 的路由器，或确认其已激活。",
       "ownLabel": "自有网络",
       "notParticipating": "该设备不提供探测数据。提供的设备有：{{units}}",
-      "unitNoSurvey": "该设备没有 WiFi 射频，或未返回探测数据（仅 SNMP/有线）。"
+      "unitNoSurvey": "该设备没有 WiFi 射频，或未返回探测数据（仅 SNMP/有线）。",
+      "reason": {
+        "agentNoSurvey": "NetPulse 代理无法从该设备的驱动读取 survey 数据。",
+        "noSurveyData": "survey 已执行，但没有返回任何信道。",
+        "sshUnreachable": "该设备无法通过 SSH 访问。",
+        "noWifi": "该设备没有无线接口。",
+        "snmpOnly": "该设备仅通过 SNMP 监控，而 SNMP 不携带 survey。"
+      }
     },
     "events": {
       "title": "漫游事件",
@@ -2925,6 +2933,13 @@
       "save": "保存并重启",
       "saving": "正在保存",
       "restartHint": "保存会重写 pusher 的运行环境并重启它，因此新值立即生效。"
-    }
+    },
+    "unmanagedTitle": "由 NetPulse 外部管理",
+    "unmanagedDesc": "这些 pusher 正在为舰队提供数据，但没有集成记录，因此 NetPulse 无法启动、停止或轮换它们的 token。它们是手工安装的：要在主机上编辑其环境文件才能更改 token 或证书 pin。",
+    "unmanagedPushing": "推送中",
+    "unmanagedStale": "无数据",
+    "unmanagedVersion": "v{{version}}",
+    "unmanagedLastPush": "最近推送 {{when}}",
+    "unmanagedInterval": "每 {{count}} 秒"
   }
 }
