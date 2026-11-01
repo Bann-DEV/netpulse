@@ -707,7 +707,7 @@ export default function Integrations() {
                   )}
                 </div>
                 <div className="mt-1 text-caption text-text-muted">
-                  {t('integrations.unmanagedLastPush', { when: agoLabel(it.lastPushMs) })}
+                  {t('integrations.unmanagedLastPush', { when: lastPushLabel(it.lastPushMs) })}
                   {it.intervalS
                     ? ` · ${t('integrations.unmanagedInterval', { count: it.intervalS })}`
                     : ''}
