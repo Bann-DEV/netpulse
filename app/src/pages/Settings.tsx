@@ -4225,12 +4225,16 @@ function PushNotificationsCard({ onSaved }: { onSaved: () => void }) {
       const json = sub.toJSON()
       // #1334: el idioma efectivo (resuelto) viaja con la suscripción; el
       // server compone el push en ese idioma. 'auto' nunca se persiste: se
-      // resuelve aquí a es|en (i18n.language ya está resuelto por el detector
-      // / el ajuste del usuario).
+      // resuelve aquí a es|en|zh (i18n.language ya está resuelto por el
+      // detector / el ajuste del usuario).
       const ok = await postPushSubscribe({
         endpoint: sub.endpoint,
         keys: { auth: json.keys?.auth ?? '', p256dh: json.keys?.p256dh ?? '' },
-        language: i18n.language.startsWith('es') ? 'es' : 'en',
+        language: i18n.language.startsWith('zh')
+          ? 'zh'
+          : i18n.language.startsWith('es')
+            ? 'es'
+            : 'en',
       })
       if (!ok) {
         // El servidor no la guardó: baja local para no dejar estado fantasma
