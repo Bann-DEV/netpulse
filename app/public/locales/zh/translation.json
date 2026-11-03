@@ -317,7 +317,9 @@
       "pill": "VM",
       "note": "宿主机上的虚拟机 · 其流量走宿主机的网线",
       "noteIn": "{{host}} 上的虚拟机 · 虚拟网桥（{{port}}）· 流量走宿主机的网线"
-    }
+    },
+    "defaultRoute": "默认路由",
+    "vlan": "VLAN"
   },
   "devices": {
     "badges": {
@@ -510,6 +512,14 @@
       "banner_one": "{{count}} 台已连接设备未识别",
       "banner_other": "{{count}} 台已连接设备未识别",
       "bannerAction": "识别"
+    },
+    "pin": {
+      "pin": "固定筛选",
+      "pinHint": "每次打开客户端页面时都使用这组筛选",
+      "pinned": "已将这组筛选设为默认",
+      "unpin": "取消固定筛选",
+      "unpinHint": "打开客户端页面时不再恢复这组筛选",
+      "unpinned": "已取消固定筛选"
     }
   },
   "routers": {
@@ -518,7 +528,7 @@
       "freshTip": "netpulse-agent v{{version}} · 每 15 秒推送一次",
       "freshTipUnknown": "netpulse-agent · 每 15 秒推送一次",
       "stale": "探针离线",
-      "staleTip": "探针已注册但无响应——请在设备详情中重装",
+      "staleTip": "探针已注册但未响应。「重启探针」会通过 SSH 重启其服务并等待上报；若服务器拒绝其推送（401，令牌已失效），「重装」会轮换令牌且不删除历史。",
       "rearm": "重启探针",
       "rearming": "正在重启…",
       "netgripRestart": "重启 NetGrip",
@@ -542,10 +552,10 @@
       "upgradeNotConnected": "探针未连接",
       "upgradeFail": "无法更新",
       "upgradeTip": "从 v{{version}} 更新到服务器版本",
-      "downBanner": "探针离线——请在设备详情中重装",
+      "downBanner": "探针离线——请在「设备」页的探针区重启或重装",
       "notInstalled": "探针未安装",
-      "notInstalledTip": "该路由器配置为仅探针模式，但探针未安装。请在设备详情中重装。",
-      "notInstalledBanner": "探针未安装——请在设备详情中重装",
+      "notInstalledTip": "该路由器配置为仅探针模式，但探针未安装。请在「设备」页的探针区安装。",
+      "notInstalledBanner": "探针未安装——请在「设备」页的探针区安装",
       "stepRequested": "命令已发送",
       "stepDownloading": "下载中 {{pct}}%",
       "stepSwapping": "安装二进制",
@@ -568,7 +578,8 @@
       "timelineSummary": "· {{count}} 步 · {{secs}} 秒",
       "netgripBadge": "NetGrip",
       "netgripFreshTip": "NetGrip v{{version}} · 内嵌探针",
-      "warmingBanner": "等待探针重连…"
+      "warmingBanner": "等待探针重连…",
+      "rearmTip": "通过 SSH 重启路由器上的探针服务，并等待它的首次推送（最多 30 秒）。进程停止上报时用这个。它修不好被拒绝的令牌：那种情况该用「重装」，会签发新令牌。"
     },
     "colClients": "客户端",
     "colCpu": "CPU",
@@ -620,7 +631,7 @@
       "reinstalling": "正在重装…",
       "reinstalled": "已重装",
       "reinstallRetry": "重试",
-      "reinstallTip": "通过 SSH 在该路由器上重装探针（二进制、配置和服务）。若探针被固件更新或手动卸载移除，请使用此项。",
+      "reinstallTip": "通过 SSH 在该路由器上重装探针（二进制、配置和服务），并轮换其令牌。若探针被固件更新或手动卸载移除，或服务器以 401 拒绝其推送（重启或服务器迁移导致令牌失效），请使用此项。路由器的历史会保留。",
       "reinstallConfirm": "在 {{router}} 上重装探针？当前探针（若有）将被替换并轮换其令牌。",
       "reinstallDone": "探针已重装并恢复上报。",
       "reinstallPending": "探针已安装，等待其上报（最多 40 秒）。",
@@ -672,11 +683,31 @@
       "kindExternal": "外部",
       "netgripTip": "探针位于该路由器的 NetGrip 面板内",
       "netgripHint": "探针位于 NetGrip 面板内：更新会升级面板本身",
-      "netgripStaleHint": "探针位于 NetGrip 面板内。若它停止上报，请用按钮重启（重启路由器上的 NetGrip 服务），或在有新版本时更新面板。"
+      "netgripStaleHint": "探针位于 NetGrip 面板内。若它停止上报，请用按钮重启（重启路由器上的 NetGrip 服务），或在有新版本时更新面板。",
+      "forgetHostKey": "忘记主机密钥",
+      "forgetHostKeyTip": "删除保存的 SSH 主机密钥。在固件重新生成了密钥、重刷固件，或同一地址换了设备之后使用。",
+      "forgetRetry": "重试忘记主机密钥",
+      "forgetting": "正在忘记…",
+      "forgotten": "已忘记主机密钥",
+      "rejectedBadge": "令牌被拒绝",
+      "rejectedTip": "服务器正以 401 拒绝该探针的推送：令牌不匹配（路由器重启或服务器迁移后常见）。用「重启探针」或「重装」修复；首次成功推送后该标记会自动消失。",
+      "rotate": "重新生成令牌",
+      "rotateFail": "无法重新生成令牌",
+      "rotateRetry": "重试生成令牌",
+      "rotateTip": "为该设备生成新令牌。若服务器能通过 SSH 下发，探针可继续运行；否则需要重装探针。",
+      "rotated": "令牌已重新生成",
+      "rotating": "正在重新生成…"
     },
     "upgradeUpdatedDetail": "已更新 · {{count}} 步 · {{secs}} 秒",
     "noVitals": "无系统指标",
-    "noVitalsTip": "通过 SNMP 或信标监控：该设备不上报 CPU、内存或温度"
+    "noVitalsTip": "通过 SNMP 或信标监控：该设备不上报 CPU、内存或温度",
+    "statusReason": {
+      "pusher_api_not_found": "API 端点不存在：固件太旧，不支持 REST API（RouterOS 需要 7 或更高版本）。",
+      "pusher_auth_failed": "身份验证被拒绝：设备不接受保存的凭据（用户名或密码错误）。",
+      "pusher_conn_refused": "连接被拒绝：设备没有在 API 服务或端口上应答（检查 www/www-ssl 或 api，以及防火墙）。",
+      "pusher_error": "集成的 pusher 记录了错误；请在「设置 > 集成」中查看明细。",
+      "pusher_stopped": "集成的 pusher 已停止：请在「设置 > 集成」中启动它。"
+    }
   },
   "routerDetail": {
     "adguard": {
@@ -874,7 +905,8 @@
       "peersConnected": "已连接对端",
       "serverActive": "服务端活跃",
       "transfer30d": "30 天传输量"
-    }
+    },
+    "statusReasonTitle": "该设备离线的原因"
   },
   "alerts": {
     "allRead": "全部已读——网络很安静",
@@ -1520,7 +1552,7 @@
       "badge": "实验"
     },
     "services": {
-      "title": "服务与集成",
+      "title": "集成",
       "caption": "可见的网络服务与已启用的服务器集成",
       "adguardCaption": "网关上的过滤 DNS",
       "wireguardCaption": "WireGuard VPN 隧道",
@@ -1531,11 +1563,18 @@
       "networkGroup": "网络服务",
       "rackCaption": "绘制你的机架并检测网线。默认关闭。",
       "firmwareUpgradesCaption": "显示或隐藏固件升级页",
-      "integrationsGroup": "集成",
+      "integrationsGroup": "附加组件",
       "proxmoxCaption": "集群清单（宿主机与其 CT）",
       "mqttCaption": "将设备组状态发布到 MQTT 代理",
       "mcpCaption": "供 AI 助手使用的只读查询",
-      "configure": "配置 {{name}}"
+      "configure": "配置 {{name}}",
+      "externalAgents": "外部探针",
+      "externalAgentsCaption": "添加受支持的非 OpenWrt 设备",
+      "firmwares": "固件",
+      "rtlDescription": "rtlplayground 是把 Realtek 交换机变成 NetPulse 探针的固件。刷写说明、技术指南与镜像：",
+      "rtlImages": "镜像",
+      "rtlInstructions": "刷写说明",
+      "rtlTechGuide": "技术指南"
     },
     "session": {
       "active": "此设备上的当前会话",
@@ -1778,14 +1817,24 @@
       "instance": "实例",
       "interval": "发布间隔（秒）",
       "incomplete": "启用 MQTT 需要代理地址",
-      "hint": "代理连接不带 TLS：请与本地网络中的代理配合使用。若某路由器用 NetGrip 自我暴露，NetPulse 不会重复它。",
+      "hint": "发布者按下面配置的传输方式连接。启用 TLS 后，除非你允许自签证书，否则会对照系统根证书校验。若某路由器用 NetGrip 自我暴露，NetPulse 不会重复它。",
       "test": "测试连接",
       "propagate": "传播到 NetGrip",
       "propagateEmpty": "设备组中没有可传播到的 NetGrip 路由器。",
       "running": "正在发布",
       "notRunning": "已停止",
       "propagatePending": "已发送，等待确认",
-      "propagateHint": "“已发送”并不代表已生效：要等 agent 回报结果，这个计划才会结束。实际状态请在编排页查看。"
+      "propagateHint": "“已发送”并不代表已生效：要等 agent 回报结果，这个计划才会结束。实际状态请在编排页查看。",
+      "errors": {
+        "agentNotConnected": "探针未连接",
+        "insecureTransport": "探针未经 HTTPS 连接服务器",
+        "netgripUpdateRequired": "使用 TLS 需要路由器上的 NetGrip 0.78.0 或更高版本"
+      },
+      "testOk": "已连接到代理。",
+      "tls": "TLS",
+      "tlsHint": "对到代理的链接启用加密（通常是 8883 端口）。证书会对照系统根证书校验。",
+      "tlsInsecure": "允许自签证书",
+      "tlsInsecureHint": "跳过证书校验。仅用于你自己网络中使用自签证书的代理。"
     },
     "alertsLang": {
       "title": "通知语言",
@@ -1800,7 +1849,6 @@
       "portTitle": "端口",
       "portHint": "立即生效，无需重启。指向当前端点的探针和 NetGrip 需更新其 URL。",
       "portApply": "更改",
-      "locked": "固定在服务器的环境文件中；请到那里更改。",
       "rootTitle": "根证书",
       "rootHint": "在你用来访问 NetPulse 的每台手机和电脑上安装一次。信任它之前，请核对你设备显示的指纹与此指纹、以及服务器日志中的指纹是否一致。",
       "names": "证书覆盖 {{names}} 并会自行续期（当前有效至 {{until}}）。",
@@ -1851,7 +1899,23 @@
         "not_openwrt": "不是原生 OpenWrt 探针（已跳过）",
         "netgrip_managed": "内嵌于 NetGrip（请改为更新 NetGrip）",
         "router_unknown": "无路由器条目（已跳过）"
-      }
+      },
+      "certApply": "使用此证书",
+      "certConfigure": "配置证书",
+      "certCurrentCa": "正在提供 NetPulse CA。",
+      "certCurrentCustom": "正在提供 {{path}}。",
+      "certHint": "NetPulse 可以提供自己的私有 CA，也可以使用你在这台机器上已有的证书。",
+      "certModeCa": "NetPulse CA",
+      "certModeCustom": "我自己的证书",
+      "certPathLabel": "证书（完整链，PEM）",
+      "certRenewHint": "证书在它签发的地方续期。若新证书换了密钥，钉住旧密钥的探针会停止上报直到你重装它们，所以请用同一密钥续期（certbot --reuse-key）。",
+      "certTitle": "证书",
+      "certUseCa": "使用 NetPulse CA",
+      "enableLabel": "启用",
+      "extraConfigure": "配置附加选项",
+      "extraDisabled": "先启用 HTTPS，才能修改明文 HTTP 仍被允许做什么。",
+      "extraTitle": "附加选项",
+      "keyPathLabel": "私钥（PEM）"
     },
     "adguard": {
       "title": "AdGuard Home",
@@ -2068,7 +2132,19 @@
       "network": "可连接 GitHub",
       "concurrent": "无正在进行的更新",
       "ok": "正常",
-      "fail": "失败"
+      "fail": "失败",
+      "detail": {
+        "busy": "已有更新正在进行",
+        "diskError": "无法读取剩余磁盘空间",
+        "diskLow": "剩余 {{free}} MB，需要 {{need}} MB",
+        "diskOk": "剩余 {{free}} MB",
+        "gitDirty": "存在未提交的更改",
+        "gitError": "无法读取 git 状态",
+        "gitNoClone": "不适用（非 git 克隆）",
+        "gitStable": "不适用（稳定版布局）",
+        "netUnreachable": "无法连接 GitHub",
+        "netUrl": "API 地址无效"
+      }
     },
     "confirmed": "已更新到 {{sha}}",
     "history": {
@@ -2183,7 +2259,7 @@
     },
     "survey": {
       "title": "当前信道",
-      "empty": "没有路由器返回探测数据。请确认你的路由器上 `iw dev wlanX survey dump` 可用。",
+      "empty": "没有设备返回探测数据。下方列出每台设备的原因。",
       "unreachable": "通过 SSH 无法访问该路由器，或没有无线接口。",
       "colChannel": "信道",
       "colFreq": "MHz",
@@ -2202,7 +2278,7 @@
       "noScans": "该路由器不上报信道扫描。NetGrip 路由器不做扫描；请使用运行 NetPulse agent 的路由器，或确认其已激活。",
       "ownLabel": "自有网络",
       "notParticipating": "该设备不提供探测数据。提供的设备有：{{units}}",
-      "unitNoSurvey": "该设备没有 WiFi 射频，或未返回探测数据（仅 SNMP/有线）。",
+      "unitNoSurvey": "该设备不提供探测数据。",
       "reason": {
         "agentNoSurvey": "NetPulse 代理无法从该设备的驱动读取 survey 数据。",
         "noSurveyData": "survey 已执行，但没有返回任何信道。",
@@ -2493,7 +2569,26 @@
     "tipUpgradeOwut": "立即用 owut 刷写目标版本（保留当前软件包）",
     "tipSchedule": "计划稍后或周期性升级",
     "tipSave": "为经典流程（URL/镜像）保存型号与目标",
-    "owutStepsGroup": "owut 步骤"
+    "owutStepsGroup": "owut 步骤",
+    "asuLatestTag": "最新（ASU）",
+    "backupScheduleCaption": "每周向已连接的探针发送一次备份。若没有探针在线，会在其重连后重试。",
+    "backupScheduleDay": "星期",
+    "backupScheduleEnabled": "启用",
+    "backupScheduleError": "无法保存计划",
+    "backupScheduleLastRun": "上次：{{when}}",
+    "backupScheduleNextRun": "下次：{{when}}",
+    "backupScheduleSave": "保存",
+    "backupScheduleSaved": "计划已保存",
+    "backupScheduleTime": "时间",
+    "backupScheduleTitle": "计划配置备份",
+    "excludeAddAction": "加入",
+    "excludeAddBody": "{{pkgs}} 会被追加到 attendedsysupgrade.owut.remove 并保存配置。此后 owut download、install 与 upgrade 的行为与在设备上手动执行一致。",
+    "excludeAddRouter": "加入路由器列表",
+    "excludeAddTitle": "将软件包加入路由器列表",
+    "excludePkgsFromRouter": "路由器自身构建已经排除这些软件包：{{pkgs}}。该字段已按此列表填好，下载前请核对。",
+    "resetStale": "重置状态",
+    "resetStaleHint": "清除卡住超过 15 分钟的尝试记录（路由器没有回来，或 SSH 会话中断），以便重新发起。",
+    "tipOwutInstallNeedsDownload": "请先下载镜像：「安装镜像」刷写的是「下载镜像」生成的文件"
   },
   "orchestration": {
     "title": "编排",
@@ -2796,8 +2891,8 @@
     "empty": "暂无机柜",
     "emptyHint": "请先创建一个机柜",
     "pickHint": "拖到机柜上（或点击）以安装到当前活动机柜（青色那个）。然后拖动以调整槽位。",
-    "pickFleet": "路由器",
-    "pickDevice": "设备",
+    "pickFleet": "设备组单元",
+    "pickDevice": "客户端",
     "pickAccessory": "配件",
     "plates": {
       "server-1u": "1U 服务器",
@@ -2843,7 +2938,12 @@
     "betaTitle": "预览：仍有大量工作",
     "betaText": "此视图仍在积极开发中，尚不完全可靠。请勿在生产环境中使用；欢迎反馈。",
     "disabledTitle": "机柜视图已禁用",
-    "disabledText": "这是一个可选视图。请在 设置 → 服务 → 机柜视图 中启用它。"
+    "disabledText": "这是一个可选视图。请在 设置 → 服务 → 机柜视图 中启用它。",
+    "askWidth": "宽度",
+    "pickDeviceHint": "尚未上架的有线客户端。只有确实无法装进机柜的才被排除：手机、平板、笔记本和房间电器。",
+    "widthFull": "整格",
+    "widthHalf": "半格",
+    "widthThird": "三分之一"
   },
   "integrations": {
     "title": "集成",
@@ -2858,7 +2958,9 @@
       "running": "运行中",
       "stopped": "已停止",
       "error": "错误",
-      "installing": "安装中"
+      "installing": "安装中",
+      "stale": "已过期",
+      "unverified": "未验证"
     },
     "ago": {
       "s": "{{count}} 秒前",
@@ -2896,7 +2998,8 @@
       "modeLocalHint": "这个 pusher 运行在 NetPulse 主机上。",
       "modeSshHint": "SSH 模式下，pusher 会被安装到路由器内部。",
       "submit": "创建",
-      "creating": "正在创建…"
+      "creating": "正在创建…",
+      "fieldPasswordSshHint": "安装以及后续操作会用该密码通过 SSH 登录路由器。仍优先使用已授权的密钥：当路由器只接受密码时（例如原厂 Asuswrt）才填写此项。"
     },
     "token": {
       "tokenTitle": "集成已创建",
@@ -2925,7 +3028,9 @@
       "router_error": "路由器返回了错误。",
       "not_found": "未找到该集成。",
       "db_error": "数据库错误。",
-      "generic": "出了点问题。"
+      "generic": "出了点问题。",
+      "refresh_failed": "无法刷新目录。",
+      "ssh_auth_failed": "SSH 身份验证失败：请检查路由器的用户名和密码。"
     },
     "edit": {
       "title": "编辑集成",
@@ -2933,7 +3038,8 @@
       "fieldPasswordKeep": "留空则保留当前密码",
       "save": "保存并重启",
       "saving": "正在保存",
-      "restartHint": "保存会重写 pusher 的运行环境并重启它，因此新值立即生效。"
+      "restartHint": "保存会重写 pusher 的运行环境并重启它，因此新值立即生效。",
+      "fieldPasswordSshHint": "同时更新服务器连接路由器所用的 SSH 密码。留空则两者都保留。"
     },
     "unmanagedTitle": "由 NetPulse 外部管理",
     "unmanagedDesc": "这些 pusher 正在为舰队提供数据，但没有集成记录，因此 NetPulse 无法启动、停止或轮换它们的 token。它们是手工安装的：要在主机上编辑其环境文件才能更改 token 或证书 pin。",
@@ -2941,6 +3047,11 @@
     "unmanagedStale": "无数据",
     "unmanagedVersion": "v{{version}}",
     "unmanagedLastPush": "最近推送 {{when}}",
-    "unmanagedInterval": "每 {{count}} 秒"
+    "unmanagedInterval": "每 {{count}} 秒",
+    "catalog": {
+      "refresh": "刷新目录",
+      "refreshing": "正在刷新…",
+      "updated": "目录已于 {{time}} 更新"
+    }
   }
 }
