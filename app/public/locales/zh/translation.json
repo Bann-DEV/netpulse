@@ -1274,7 +1274,8 @@
         "timeHint": "留空＝每 N 小时；填时间则每天在该时间",
         "saveError": "无法保存设置",
         "error": "无法创建备份",
-        "done": "备份创建成功"
+        "done": "备份创建成功",
+        "scope": "每个备份都包含数据库、SSH 密钥和 TLS 材料，因此可以还原到另一台主机上"
       },
       "orchestration": "网络编排"
     },
@@ -2427,11 +2428,12 @@
     "legendDfs": "DFS 范围（雷达）",
     "legendSuggested": "建议信道块",
     "legendCurrent": "你的信道",
-    "heatNoteKnown": "各邻居的真实带宽来自其 HT/VHT 通告"
+    "heatNoteKnown": "各邻居的真实带宽来自其 HT/VHT 通告",
+    "scanRefused": "该射频拒绝了扫描：{{reason}}"
   },
   "firmwareUpgrades": {
     "title": "固件升级",
-    "subtitle": "计划 OpenWrt 固件升级并按路由器跟踪进度。",
+    "subtitle": "跟踪每台设备、发起刷机，并在任何改动之前保留一份配置备份。",
     "disabledTitle": "固件升级已隐藏",
     "disabledText": "请在 设置 > 服务 中开启，以便在此管理固件升级。",
     "currentVersion": "当前版本",
@@ -2861,6 +2863,31 @@
           "在你的助手里，用 URL http://IP:端口/mcp 和把令牌作为 Bearer 凭据来配置一个远程 MCP 服务器。"
         ],
         "tip": "这些工具是只读的，每次调用都记录在服务器日志中。不再使用时请撤销令牌。"
+      },
+      "integrations": {
+        "title": "连接集成",
+        "subtitle": "无法通过 SSH 轮询的设备",
+        "intro": "pusher 是一个小二进制程序，跑在设备所在的主机上，把数据发给 NetPulse。每个厂商都是独立的可执行文件，所以你只需要下载自己硬件对应的那份代码。",
+        "steps": [
+          "打开 ⟦设置⟧，找到 ⟦附加组件⟧ 分组。",
+          "打开 ⟦外部探针⟧ 并点击它的齿轮图标，进入集成管理器。",
+          "在目录里选择厂商：asuswrt、bbox、opnsense、routeros、unifi 等。",
+          "NetPulse 会部署 pusher、启动它，并让你在同一个对话框里编辑它的设置和 token。",
+          "已经在推送但没有集成记录的设备会出现在 ⟦由 NetPulse 外部管理⟧ 下面，带上版本和最近推送时间：NetPulse 无法启动它，也无法轮换它的 token。"
+        ]
+      },
+      "certificates": {
+        "title": "安装你自己的证书",
+        "subtitle": "用你自己的证书或 CA 启用 HTTPS",
+        "intro": "设置里的 HTTPS 卡片接受你自己的证书或由你的 CA 签发的证书。这一对会先通过校验，再去动监听端口，所以一张坏证书不会把整个实例带崩。",
+        "steps": [
+          "打开 ⟦设置⟧，进入 ⟦HTTPS⟧ 卡片。",
+          "选择来源：⟦NetPulse CA⟧ 或 ⟦我自己的证书⟧。",
+          "指向证书和私钥的路径，私钥加密时填上口令。",
+          "应用：NetPulse 加载这一对并重启监听；如果新的起不来，它会回滚。",
+          "agent 会 pin 住叶子公钥，所以换过证书之后必须重新配对它们。",
+          "在 ⟦附加选项⟧ 里你可以重新签发连接字符串，并决定明文 HTTP 还允许做什么。"
+        ]
       }
     }
   },
