@@ -837,7 +837,8 @@
       "fam_vlan": "VLAN",
       "fam_bridge": "网桥",
       "fam_tunnel": "隧道",
-      "fam_virtual": "虚拟"
+      "fam_virtual": "虚拟",
+      "fam_wifi": "WiFi"
     },
     "radios": {
       "channel": "信道",
@@ -860,7 +861,9 @@
       "title": "VLAN",
       "toggleAria": "网桥 VLAN（{{count}}）",
       "untagged": "不带标签",
-      "vlanId": "VLAN ID"
+      "vlanId": "VLAN ID",
+      "id": "ID",
+      "subnet": "子网"
     },
     "wan": {
       "chartAria": "网关 WAN 流量。当前下载 {{down}} Mbps，上传 {{up}} Mbps。",
