@@ -1216,6 +1216,10 @@
       "firmware-target-unknown": {
         "title": "固件目标不可用",
         "description": "{{router}}：配置的目标 \"{{target}}\" 不在已发布的 OpenWrt 版本中（请在固件升级中检查名称）"
+      },
+      "unverified-mac": {
+        "title": "{{router}} 上的未证实设备",
+        "description": "{{mac}} 在 {{where}} 已存在 {{minutes}} 分钟，但没有租约、ARP、ND 或 mDNS"
       }
     },
     "viewDevice": "查看设备",
@@ -2286,7 +2290,8 @@
         "sshUnreachable": "该设备无法通过 SSH 访问。",
         "noWifi": "该设备没有无线接口。",
         "snmpOnly": "该设备仅通过 SNMP 监控，而 SNMP 不携带 survey。"
-      }
+      },
+      "overlayOnly": "本设备没有底噪探测数据，显示的是上次扫描到的邻居。"
     },
     "events": {
       "title": "漫游事件",
