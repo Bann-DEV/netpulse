@@ -696,7 +696,8 @@
       "rotateRetry": "重试生成令牌",
       "rotateTip": "为该设备生成新令牌。若服务器能通过 SSH 下发，探针可继续运行；否则需要重装探针。",
       "rotated": "令牌已重新生成",
-      "rotating": "正在重新生成…"
+      "rotating": "正在重新生成…",
+      "outputTitle": "命令输出"
     },
     "upgradeUpdatedDetail": "已更新 · {{count}} 步 · {{secs}} 秒",
     "noVitals": "无系统指标",
@@ -907,9 +908,28 @@
       "lastIp": "最近 IP",
       "peersConnected": "已连接对端",
       "serverActive": "服务端活跃",
-      "transfer30d": "30 天传输量"
+      "transfer30d": "30 天传输量",
+      "configButton": "设置",
+      "configTitle": "WireGuard 设置",
+      "showDisconnected": "显示未连接客户端",
+      "showDisconnectedHint": "指没有活跃握手的客户端。仅影响本浏览器中的这张卡片。",
+      "hiddenPeers_one": "已隐藏 1 个未连接客户端",
+      "hiddenPeers_other": "已隐藏 {{count}} 个未连接客户端"
     },
-    "statusReasonTitle": "该设备离线的原因"
+    "statusReasonTitle": "该设备离线的原因",
+    "networks": {
+      "title": "网络",
+      "network": "网络",
+      "subnet": "子网",
+      "members": "成员",
+      "clients": "客户端",
+      "clientsTip": "VLAN 已知的客户端",
+      "device": "设备",
+      "traffic": "流量",
+      "noCounters": "该设备不上报每接口计数器",
+      "toggleAria": "OpenWrt 网络（{{count}}）",
+      "vlan": "VLAN {{id}}"
+    }
   },
   "alerts": {
     "allRead": "全部已读——网络很安静",
