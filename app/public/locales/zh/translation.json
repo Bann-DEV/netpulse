@@ -697,7 +697,9 @@
       "rotateTip": "为该设备生成新令牌。若服务器能通过 SSH 下发，探针可继续运行；否则需要重装探针。",
       "rotated": "令牌已重新生成",
       "rotating": "正在重新生成…",
-      "outputTitle": "命令输出"
+      "outputTitle": "命令输出",
+      "sshTimeout": "服务端已停止等待路由器返回。命令可能仍在执行：一分钟后再刷新查看 agent。",
+      "sshUnreachable": "浏览器无法访问服务端。请检查连接后重试。"
     },
     "upgradeUpdatedDetail": "已更新 · {{count}} 步 · {{secs}} 秒",
     "noVitals": "无系统指标",
@@ -755,7 +757,12 @@
       "netgripTip": "NetGrip 面板运行在 8080 端口",
       "timezone": "时区",
       "title": "信息",
-      "updated": "已是最新"
+      "updated": "已是最新",
+      "inventory": "客户端清单",
+      "inventoryAgent": "Agent",
+      "inventorySsh": "SSH",
+      "inventorySnmp": "SNMP",
+      "inventoryExternal": "集成"
     },
     "latency": {
       "24h": "24 小时延迟",
@@ -928,7 +935,9 @@
       "traffic": "流量",
       "noCounters": "该设备不上报每接口计数器",
       "toggleAria": "OpenWrt 网络（{{count}}）",
-      "vlan": "VLAN {{id}}"
+      "vlan": "VLAN {{id}}",
+      "showClients": "显示客户端",
+      "hideClients": "隐藏客户端"
     }
   },
   "alerts": {
@@ -1524,7 +1533,13 @@
       "disabledHint": "不轮询、不告警；历史保留。“已暂停”徽标在设备组中标记它，并使其从下拉中消失。",
       "disabledBadge": "已暂停",
       "snmpCommunityConfigured": "已配置。留空则保留当前值。",
-      "snmpCommunityClear": "移除 community"
+      "snmpCommunityClear": "移除 community",
+      "inventoryMode": "客户端清单方式",
+      "inventoryModeAuto": "自动",
+      "inventoryModeAgent": "仅 Agent",
+      "inventoryModeSsh": "仅 SSH",
+      "inventoryModeSshBadge": "仅 SSH",
+      "inventoryModeHint": "自动：agent 有上报时优先用它，否则回落到 SSH。仅 Agent：绝不使用 SSH。仅 SSH：预期没有 agent，清单通过 SSH 读取，agent 缺席不视为故障。"
     },
     "overrides": {
       "title": "拓扑——手动标记",
