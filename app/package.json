@@ -1,7 +1,7 @@
 {
   "name": "netpulse",
   "private": true,
-  "version": "2.51.3",
+  "version": "2.51.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
