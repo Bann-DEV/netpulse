@@ -55,7 +55,12 @@ i18n
 // it -- and the translator mangles the data (hostnames "crowed" →
 // "crowded"). With the right lang, a translated UI raises no such offer.
 const applyDocLang = (lng?: string) => {
-  const l = (lng ?? i18n.language ?? DEFAULT_LNG).slice(0, 2).toLowerCase()
+  const resolved = lng ?? i18n.language
+  // During 'auto' boot the detector has not resolved yet: keep the lang the
+  // head script set from the saved choice / navigator, instead of clobbering
+  // it back to the English default (which made Chrome offer to translate).
+  if (!resolved) return
+  const l = resolved.slice(0, 2).toLowerCase()
   document.documentElement.lang = l === 'en' ? 'en' : l === 'zh' ? 'zh-CN' : 'es'
 }
 applyDocLang()
